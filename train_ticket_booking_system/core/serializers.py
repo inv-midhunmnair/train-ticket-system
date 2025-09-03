@@ -20,7 +20,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = '__all__'
+        fields = ['id','email','phone_number','first_name','last_name','username','role_display']
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -36,7 +36,7 @@ class UserSerializer(serializers.ModelSerializer):
 class UpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        exclude = ['password','email']
+        fields = ['id','username','first_name','last_name','phone_number']
 
 class GetUserSerializer(serializers.ModelSerializer):
     class Meta:

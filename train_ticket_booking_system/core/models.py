@@ -8,6 +8,8 @@ class User(AbstractUser):
     otp = models.IntegerField(blank=True, null=True)
     otp_expires_at = models.DateTimeField(blank=True, null=True)
     email = models.EmailField(unique=True)
+    forgot_password_otp = models.IntegerField(blank=True, null=True)
+    forgot_password_otp_expiry = models.DateTimeField(blank=True, null=True)
 
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = ['username','role','first_name','last_name','phone_number','password']
