@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from .views import StationViewset, TrainDetailsViewset, TrainroutesViewset, UserViewset,VerifyEmailView,GetUserViewset,SearchResultsview
+from .views import BookingView, StationViewset, TrainDetailsViewset, TrainTrackingView, TrainroutesViewset, UserViewset,VerifyEmailView,GetUserViewset,SearchResultsview
 
 router = DefaultRouter()
 
@@ -13,5 +13,7 @@ router.register(r'stations', StationViewset)
 urlpatterns = [
     path('', include(router.urls)),
     path('verify-email', VerifyEmailView.as_view(), name='verify-email'),
-    path('search/', SearchResultsview.as_view())
+    path('search/', SearchResultsview.as_view()),
+    path('status/',TrainTrackingView.as_view()),
+    path('booking/', BookingView.as_view())
 ]

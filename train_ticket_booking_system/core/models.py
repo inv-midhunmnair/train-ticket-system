@@ -35,5 +35,40 @@ class Trainroute(models.Model):
     arrival_time = models.TimeField()
     departure_time = models.TimeField()
     day_offset = models.PositiveIntegerField()
+    distance = models.IntegerField(null=True) 
 
     REQUIRED_FIELDS = ['train_id','station_id','stop_order','arrival_time','departure_time','day_offset']
+
+class TrainCoach(models.Model):
+    train = models.ForeignKey(Train, on_delete=models.CASCADE)
+    capacity = models.IntegerField()
+    coach_type = models.CharField(max_length=50)
+    coach_number = models.CharField(max_length=10)
+    base_price = models.IntegerField(null=True)
+    fare_per_km = models.IntegerField(null=True)
+
+    def __str__(self):
+        return f"{self.coach_number}"
+
+class Seat(models.Model):
+    coach = models.ForeignKey(TrainCoach,on_delete=models.CASCADE)
+    berth_type = models.CharField(max_length=50)
+    seat_number = models.IntegerField()
+
+    def __str__(self):
+        return f"{self.seat_number} and {self.berth_type}"
+
+class Booking(models.Model):
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
+    train = models.ForeignKey(Train, on_delete=models.CASCADE)
+    from_station = models.ForeignKey(Station, on_delete=models.CASCADE,related_name="from_bookings")
+    to_station = models.ForeignKey(Station, on_delete=models.CASCADE,related_name="to_bookings")
+    journey_date = models.DateField()
+    status = models.CharField(max_length=20)
+
+class Passenger(models.Model):
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE)
+    seat = models.ForeignKey(Seat, on_delete=models.CASCADE)
+    passenger_name = models.CharField(max_length=100)
+    passenger_age = models.IntegerField()
+    passenger_gender = models.CharField(max_length=15)
