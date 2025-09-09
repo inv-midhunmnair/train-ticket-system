@@ -30,7 +30,7 @@ class Station(models.Model):
 
 class Trainroute(models.Model):
     train = models.ForeignKey(Train, on_delete=models.CASCADE, related_name="train_route")
-    station = models.ForeignKey(Station, on_delete=models.CASCADE)
+    station = models.ForeignKey(Station, on_delete=models.CASCADE, related_name='train_routes')
     stop_order = models.PositiveIntegerField()
     arrival_time = models.TimeField()
     departure_time = models.TimeField()

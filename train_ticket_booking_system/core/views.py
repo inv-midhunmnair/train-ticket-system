@@ -473,21 +473,21 @@ class BookingView(APIView):
         coach = TrainCoach.objects.filter(train=train,coach_type=coach_type)
         # print(coach)
         seats = Seat.objects.filter(coach_id__in=coach)
-        # print(seats)
+        # print(seats)  
         
         train_routes = Trainroute.objects.filter(train=train).order_by('stop_order')
 
         from_route = train_routes.filter(station=from_station).first()
         to_route = train_routes.filter(station=to_station).first()
 
-        print(from_route)
-        print(to_route)
-
         if not from_route:
-            return Response({"error":f"This train doesen't go through {from_station.station_name}"})
+            return Response({"error":f"This train doesen't go through {from_station.station_name}"},status=status.HTTP_400_BAD_REQUEST)
         if not to_route:
-            return Response({"error":f"This train doesen't go through {to_station.station_name}"})
+            return Response({"error":f"This train doesen't go through {to_station.station_name}"},status=status.HTTP_400_BAD_REQUEST)
         
+        from_order = from_route.stop_order
+        to_order = to_route.stop_order
+
         if from_route.stop_order>to_route.stop_order:
             return Response({"error":"Train doesen't go this order"},status=status.HTTP_400_BAD_REQUEST)
         
@@ -500,9 +500,15 @@ class BookingView(APIView):
 
         if day_name not in train_schedule_days:
             return Response({"error":"Train doesen't run on this day"},status=status.HTTP_400_BAD_REQUEST)
+        
+        stations_before_to = Trainroute.objects.filter(train=train, stop_order__lt=to_order).values("station")
+        stations_after_from = Trainroute.objects.filter(train=train,stop_order__gt=from_order).values("station")
+        
         booked = Passenger.objects.filter(
             booking__train=train,
             booking__journey_date = journey_date,
+            booking__from_station__in = stations_before_to,
+            booking__to_station__in = stations_after_from,
             booking__status = "confirmed", 
         ).values_list("seat_id",flat=True)
 
@@ -533,3 +539,12 @@ class BookingView(APIView):
                 seat = available_seats[i]
             )
         return Response({"message":f"Successfully booked {no_of_tickets} tickets"})
+    
+    def delete(self,request,booking_id):
+
+        booking = Booking.objects.get(id=booking_id, user=request.user)
+
+        booking.status = "cancelled"
+        booking.save()
+
+        return Response({"message":"Booking cancelled successfully"})

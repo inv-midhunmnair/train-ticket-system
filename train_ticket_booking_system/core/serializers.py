@@ -1,4 +1,4 @@
-from .models import User, Train, Station, Trainroute
+from .models import Booking, User, Train, Station, Trainroute
 from rest_framework import serializers
 from .validators import *
 
@@ -67,7 +67,6 @@ class TrainSerializer(serializers.ModelSerializer):
         model = Train
         fields = '__all__'
 
-
 class TrainSearchSerializer(serializers.ModelSerializer):
 
     train = TrainSerializer(read_only=True)
@@ -77,5 +76,4 @@ class TrainSearchSerializer(serializers.ModelSerializer):
         model = Trainroute
         fields = '__all__'
     
-            
             
