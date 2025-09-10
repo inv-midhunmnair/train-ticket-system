@@ -1,0 +1,47 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.egg
+*.egg-info/
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# Database
+*.sqlite3
+*.db.sqlite3
+
+# Media and static files (if served directly from project)
+media/
+static/
+
+# Environment variables
+.env
+.flaskenv
+
+# Log files
+*.log
+
+# IDE-specific files
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+
+# Testing and coverage
+.tox/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Deployment files
+*.tar.gz
+*.zip
+
+# Django-specific
+# migrations/__pycache__/ # Uncomment if you want to ignore migration cache files
