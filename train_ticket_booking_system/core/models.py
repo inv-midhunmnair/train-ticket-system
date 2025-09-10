@@ -56,7 +56,7 @@ class Seat(models.Model):
     seat_number = models.IntegerField()
 
     def __str__(self):
-        return f"{self.seat_number} and {self.berth_type}"
+        return f"{self.seat_number} and {self.berth_type} from {self.coach.coach_number}"
 
 class Booking(models.Model):
     user = models.ForeignKey(User, on_delete=models.CASCADE)
@@ -67,8 +67,11 @@ class Booking(models.Model):
     status = models.CharField(max_length=20)
 
 class Passenger(models.Model):
-    booking = models.ForeignKey(Booking, on_delete=models.CASCADE)
+    booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='passengers')
     seat = models.ForeignKey(Seat, on_delete=models.CASCADE)
     passenger_name = models.CharField(max_length=100)
     passenger_age = models.IntegerField()
     passenger_gender = models.CharField(max_length=15)
+
+    def __str__(self):
+        return f"{self.seat.coach}"
