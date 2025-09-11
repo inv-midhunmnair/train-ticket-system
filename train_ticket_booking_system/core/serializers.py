@@ -124,7 +124,7 @@ class BookingSerializer(serializers.ModelSerializer):
         route = obj.train.train_route.filter(station=obj.to_station).first()
         return route.arrival_time
 
-class InputPassengerSerializer(serializers.ModelSerializer):
+class InputPassengerSerializer(serializers.Serializer):
     name = serializers.CharField()
     age =serializers.IntegerField()
     gender = serializers.CharField()

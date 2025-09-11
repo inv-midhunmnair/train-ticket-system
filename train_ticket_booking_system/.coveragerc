@@ -1,0 +1,11 @@
+[run]
+omit =
+    */migrations/*
+    */__init__.py
+    manage.py
+    train_ticket_booking_system/wsgi.py
+    train_ticket_booking_system/asgi.py
+    train_ticket_booking_system/settings.py
+
+[report]
+show_missing = True
