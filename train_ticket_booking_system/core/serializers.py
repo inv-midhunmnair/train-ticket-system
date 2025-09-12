@@ -20,7 +20,7 @@ class UserSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = User
-        fields = ['id','email','phone_number','first_name','last_name','username','role_display']
+        fields = ['id','email','phone_number','first_name','last_name','role','username','password','role_display']
         extra_kwargs = {
             'password': {'write_only': True}
         }
@@ -36,7 +36,7 @@ class UserSerializer(serializers.ModelSerializer):
 class UpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ['id','username','first_name','last_name','phone_number']
+        fields = ['id','username','first_name','last_name','phone_number','role']
 
 class GetUserSerializer(serializers.ModelSerializer):
     class Meta:
@@ -63,9 +63,12 @@ class TrainrouteSerializer(serializers.ModelSerializer):
 
 class TrainSerializer(serializers.ModelSerializer):
 
+    train_name = serializers.CharField(validators=[validate_train_name])
+    train_number = serializers.IntegerField()
+
     class Meta:
         model = Train
-        fields = '__all__'
+        fields = ['train_name','train_number','schedule_days','is_active']
 
 class TrainSearchSerializer(serializers.ModelSerializer):
 
@@ -137,4 +140,6 @@ class NewbookingSerializer(serializers.Serializer):
     date = serializers.DateField()
     coach_type = serializers.CharField()
     passengers = InputPassengerSerializer(many=True)
-    
+
+class LoginSerializer(serializers.Serializer):
+    email = serializers.EmailField()

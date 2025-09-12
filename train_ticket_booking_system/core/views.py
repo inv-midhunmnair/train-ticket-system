@@ -4,7 +4,7 @@ from rest_framework.pagination import PageNumberPagination
 from .models import Train, TrainCoach, User,Station, Trainroute, Seat, Booking, Passenger
 from rest_framework.views import APIView
 from rest_framework import viewsets
-from .serializers import TrainSearchSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
+from .serializers import TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from rest_framework.response import Response
@@ -12,6 +12,7 @@ from rest_framework import status
 from datetime import datetime, time, timedelta
 from django.utils import timezone
 import random
+from rest_framework.permissions import AllowAny
 from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 from .permissions import isAdmin
@@ -24,7 +25,7 @@ from django.core.exceptions import ObjectDoesNotExist
 
 class UserViewset(viewsets.ModelViewSet):
     queryset = User.objects.all()   
-    permission_classes = [IsAuthenticated, isAdmin]
+    permission_classes = [AllowAny]
     def get_serializer_class(self):
         if self.request.method in ['PUT','PATCH']:
             return UpdateSerializer 
@@ -40,14 +41,12 @@ class UserViewset(viewsets.ModelViewSet):
         )
 
         send_mail(
-            'You need to verify your mail before being regsitered',
+            'You need to verify your mail before being registered',
             f'Hey {user.first_name} {user.last_name} before activating your account you need to verify your email first click on this {verify_url} for verifying the mail',
             settings.DEFAULT_FROM_EMAIL,
             [user.email],
             fail_silently=True
         )
-
-        return user
     
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
@@ -94,13 +93,17 @@ class VerifyEmailView(APIView):
             return Response({"error":"Token is invalid or expired"},status = status.HTTP_400_BAD_REQUEST)
 
 class LoginOTPView(APIView):
+
     def post(self, request):
         email = request.data.get("email")
         password = request.data.get("password")
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated_data = serializer.validated_data
 
-        user = authenticate(request, username=email,password=password)
+        user = authenticate(request, username=validated_data['email'],password=password)
 
-        print(user)
+        # print(user)
         if user is None:
             return Response({"error":"Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
         db_data = User.objects.get(email=email)
@@ -131,10 +134,13 @@ class VerifyOTPView(APIView):
         email = request.data.get("email")
         otp = request.data.get("otp")
 
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated_data = serializer.validated_data
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email=validated_data['email'])
         except User.DoesNotExist:
-            return Response({"error":"Given email is invalid"}) 
+            return Response({"error":"User with that email does not exist"},status=status.HTTP_401_UNAUTHORIZED) 
 
         original_otp = user.otp
 
@@ -142,7 +148,7 @@ class VerifyOTPView(APIView):
             return Response({"error":"Wrong OTP"}, status=status.HTTP_400_BAD_REQUEST)
         
         if timezone.now()>user.otp_expires_at:
-            return Response({"error":"The otp is expired"})
+            return Response({"error":"The otp is expired"},status=status.HTTP_400_BAD_REQUEST)
         
         if user.is_active and user.is_email_verified:
             refresh = RefreshToken.for_user(user)
@@ -157,8 +163,11 @@ class VerifyOTPView(APIView):
 class ForgotPasswordOTPView(APIView):
     def post(self, request):
         email = request.data.get('email')
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated_data = serializer.validated_data
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email=validated_data['email'])
         except ObjectDoesNotExist:
             return Response({"error":"User with that email does not exist"},status=status.HTTP_401_UNAUTHORIZED)
 
@@ -186,8 +195,11 @@ class VerifyPasswordOTPView(APIView):
         email = request.data.get('email')
         entered_otp = request.data.get('otp')
 
+        serializer = LoginSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        validated_data = serializer.validated_data
         try:
-            user = User.objects.get(email=email)
+            user = User.objects.get(email=validated_data['email'])
         except ObjectDoesNotExist:
             return Response({"error":"User with that email does not exist"},status=status.HTTP_401_UNAUTHORIZED)
         
@@ -231,7 +243,7 @@ class ResetPasswordView(APIView):
                 user.save()
                 return Response({"message":"Successfully Changed the password"})
             else:
-                return Response({"error":"Passwords don't match"})
+                return Response({"error":"Passwords don't match"},status=status.HTTP_400_BAD_REQUEST)
         else:
             return Response({"Hi"})
 
@@ -248,15 +260,24 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
     queryset = Train.objects.all()
     serializer_class = TrainSerializer
 
+    def create(self,request,*args,**kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        self.perform_create(serializer)
+
+        train = serializer.instance
+
+        return Response({"message":"Successfully added train"},status=status.HTTP_201_CREATED)
+    
     def destroy(self, request, *args, **kwargs):
         train = self.get_object()
         train.is_active = False
         train.save()
 
-        return Response({"message":"Deleted successfully"})
+        return Response({"message":"Train Deleted successfully"},status=status.HTTP_204_NO_CONTENT)
     
     @action(detail=True, methods=['post'])
-    def activate(self,request,pk=None):
+    def deactivate(self,request,pk=None):
         train = self.get_object()
         # train.is_active = False
         # train.save()
@@ -270,7 +291,6 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
         for i in range(last_offset+1):
             dates.append(train_start_date+timedelta(days=i))
         
-
         bookings = Booking.objects.filter(train=train,status='confirmed', journey_date__in = dates)
         
         for booking in bookings:
@@ -325,7 +345,7 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
                 [booking.user.email],
                 fail_silently=False
             )
-        print(booking)
+        # print(booking)
         return Response({"message":"Successfully applied delay"})
     
 class StationViewset(viewsets.ModelViewSet):    
@@ -360,7 +380,6 @@ class SearchResultsview(APIView):
         train_number = request.GET.get("train_number")
         arrival_train_time = request.GET.get("time")
         coach_type = request.GET.get("type")
-        # availability_flag = request.GET.get("flag")
         min_price = request.GET.get("min")
         max_price = request.GET.get("max")
 
@@ -368,11 +387,7 @@ class SearchResultsview(APIView):
 
         if coach_type:
             queryset = queryset.filter(train__traincoach__coach_type__iexact = coach_type).distinct()
-        # if availability_flag:
-        #     availability_flag=int(availability_flag)
-        #     if availability_flag==1:
-                
-        #         queryset = queryset.filter(train__traincoach__capacity__gt=1)
+     
         if train_name:
             queryset = queryset.filter(train__train_name__icontains=train_name)
         if train_number:
@@ -446,8 +461,9 @@ class SearchResultsview(APIView):
                 if min_price <= total_price <= max_price:
                     filtered_train_ids.append(train.id)
                     break  
+            
+            queryset = queryset.filter(train_id__in=filtered_train_ids)
 
-        queryset = queryset.filter(train_id__in=filtered_train_ids)
 
         if arrival_train_time and minutes:
             start_time = datetime.strptime(arrival_train_time, "%H:%M").time()
@@ -469,6 +485,7 @@ class TrainTrackingView(APIView):
     def get(self, request):
         train_no = request.GET.get("train_number")
         date = request.GET.get("date")  
+        # now = request.GET.get("datetime")
 
         if not train_no or not date:
             return Response({"error": "train_number and date are required"},
@@ -489,13 +506,13 @@ class TrainTrackingView(APIView):
         print(start_date)
         routes = Trainroute.objects.filter(train=train).select_related("station").order_by("stop_order")
 
+        # now = datetime.strptime(now,"%Y-%m-%d %H:%M:%S")
         now = datetime.combine(search_date, time(hour=7, minute=32))
 
         for i, route in enumerate(routes):
             arrival_dt = datetime.combine(start_date, route.arrival_time) + timedelta(days=route.day_offset)
             departure_dt = datetime.combine(start_date, route.departure_time) + timedelta(days=route.day_offset)
 
-            # Case A: Train has not yet reached this station
             if now < arrival_dt:
                 return Response({
                     "train_name": train.train_name,
@@ -503,7 +520,6 @@ class TrainTrackingView(APIView):
                     "arrival":f"Expected to reach {route.station.station_name} at {arrival_dt}"
                 })
 
-            # Case B: Train is currently at this station
             if arrival_dt <= now <= departure_dt:
                 return Response({
                     "train_name": train.train_name,
@@ -511,7 +527,6 @@ class TrainTrackingView(APIView):
                               f"(Departure at {departure_dt})"
                 })
 
-            # Case C: Train is between this station and next station
             if i + 1 < len(routes):
                 next_route = routes[i + 1]
                 next_arrival_dt = datetime.combine(start_date, next_route.arrival_time) + timedelta(days=next_route.day_offset)
@@ -523,7 +538,6 @@ class TrainTrackingView(APIView):
                         "eta_next_station": next_arrival_dt
                     })
 
-        # Case D: Train has completed its journey
         last_route = routes.last()
         last_arrival_dt = datetime.combine(start_date, last_route.arrival_time) + timedelta(days=last_route.day_offset)
         last_station = last_route.station.station_name
@@ -656,7 +670,6 @@ class BookingView(APIView):
         booking_row = Booking.objects.get(id=booking_id, user=request.user)
         passengers = booking_row.passengers.all()
         new_journey_date = request.data.get("new_journey_date")
-        new_seat = request.data.get("new_seat")
 
         train_routes = Trainroute.objects.filter(train=booking_row.train).order_by('stop_order')
 
@@ -729,7 +742,7 @@ class BookingView(APIView):
 class SingleBookingView(APIView):
 
     permission_classes = [IsAuthenticated]
-
+ 
     def get(self,request,booking_id):
         try:
             booking = Booking.objects.get(id=booking_id)

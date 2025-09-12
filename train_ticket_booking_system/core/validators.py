@@ -21,3 +21,8 @@ def validate_email(email):
 def validate_username(username):
     if User.objects.filter(username=username).exists():
         raise serializers.ValidationError("Username already exists")
+
+def validate_train_name(train_name):
+     if not re.match(r'^[A-Za-z ]+$', train_name):
+            raise serializers.ValidationError("Train name must contain only letters and spaces.")
+     return train_name
