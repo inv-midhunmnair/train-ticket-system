@@ -1,7 +1,7 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 
-from .views import BookingView, SingleBookingView, StationViewset, TrainDetailsViewset, TrainTrackingView, TrainroutesViewset, UserViewset,VerifyEmailView,GetUserViewset,SearchResultsview
+from .views import BookingView, SingleBookingView,AvailabilityView, StationViewset, TrainDetailsViewset, TrainTrackingView, TrainroutesViewset, UserViewset,VerifyEmailView,GetUserViewset,SearchResultsview
 
 router = DefaultRouter()
 
@@ -18,5 +18,8 @@ urlpatterns = [
     path('status/',TrainTrackingView.as_view()),
     path('booking/',BookingView.as_view()),
     path('booking/<int:booking_id>/',BookingView.as_view()),
-    path('single-booking/<int:booking_id>/',SingleBookingView.as_view())
+    path('single-booking/<int:booking_id>/',SingleBookingView.as_view()),
+    path('availability/',AvailabilityView.as_view())
+    # path('sample/',SampleView.as_view()),
+    # path('sample/<int:train_id>/',SampleView.as_view())
 ]

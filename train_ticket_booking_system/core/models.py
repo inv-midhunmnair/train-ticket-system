@@ -17,7 +17,7 @@ class User(AbstractUser):
 class Train(models.Model):
     train_name = models.CharField(max_length=50)
     train_number = models.IntegerField(unique=True)
-    schedule_days = models.CharField()
+    schedule_days = models.JSONField(default=list)
     is_active = models.BooleanField(default=True)
 
     REQUIRED_FIELDS = ['train_name','train_number','schedule_days']
@@ -41,7 +41,6 @@ class Trainroute(models.Model):
 
 class TrainCoach(models.Model):
     train = models.ForeignKey(Train, on_delete=models.CASCADE)
-    capacity = models.IntegerField()
     coach_type = models.CharField(max_length=50)
     coach_number = models.CharField(max_length=10)
     base_price = models.IntegerField(null=True)
@@ -65,6 +64,7 @@ class Booking(models.Model):
     to_station = models.ForeignKey(Station, on_delete=models.CASCADE,related_name="to_bookings")
     journey_date = models.DateField()
     status = models.CharField(max_length=20)
+    total_fare = models.FloatField(null=True)
 
 class Passenger(models.Model):
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='passengers')

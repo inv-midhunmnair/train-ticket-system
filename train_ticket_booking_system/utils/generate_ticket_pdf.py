@@ -20,6 +20,7 @@ def generate_ticket_pdf(booking,train_start_date,from_arrival_time,to_arrival_ti
     story.append(Paragraph(f"From:{booking.from_station.station_name}"))
     story.append(Paragraph(f"Destination:{booking.to_station.station_name} will reach on {to_date} at {to_arrival_time}"))
     story.append(Paragraph(f"Status:{booking.status}"))
+    story.append(Paragraph(f"Total Fare:{booking.total_fare}"))
     story.append(Spacer(1,20))
 
     data = [["Name", "Age", "Gender", "Seat No", "Coach Number", "Berth Type"]]

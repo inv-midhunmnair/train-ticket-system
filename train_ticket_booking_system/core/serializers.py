@@ -143,3 +143,8 @@ class NewbookingSerializer(serializers.Serializer):
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
+
+# class SampleSerializer(serializers.ModelSerializer):
+#     class Meta:
+#         model = Train
+#         fields = '__all__'

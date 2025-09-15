@@ -151,6 +151,9 @@ class VerifyOTPView(APIView):
             return Response({"error":"The otp is expired"},status=status.HTTP_400_BAD_REQUEST)
         
         if user.is_active and user.is_email_verified:
+            user.otp = None
+            user.otp_expires_at = None
+            user.save()
             refresh = RefreshToken.for_user(user)
             return Response({
                 "message":"Successfull Login!!",
@@ -162,7 +165,6 @@ class VerifyOTPView(APIView):
         
 class ForgotPasswordOTPView(APIView):
     def post(self, request):
-        email = request.data.get('email')
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
@@ -224,7 +226,9 @@ class VerifyPasswordOTPView(APIView):
             [user.email],
             fail_silently=False
         )
-
+        user.forgot_password_otp = None
+        user.forgot_password_otp_expiry = None
+        user.save()
         return Response({"message":"Reset password email successfully sent to your email"})
 
 class ResetPasswordView(APIView):
@@ -438,7 +442,6 @@ class SearchResultsview(APIView):
             elif source_from and destination_to:
                 queryset = queryset.filter(train_id__in=matching_train_id)
 
-        print(queryset)
         if min_price or max_price:
             min_price = float(min_price) 
             max_price = float(max_price) 
@@ -498,16 +501,16 @@ class TrainTrackingView(APIView):
         except Train.DoesNotExist:
             return Response({"error": "Train not found"}, status=status.HTTP_404_NOT_FOUND)
         
-        scheduled_days = train.schedule_days.split(",")
+        scheduled_days = train.schedule_days
         start_date = search_date
         while start_date.strftime("%A").lower() not in scheduled_days:
             start_date = start_date - timedelta(days=1)
 
-        print(start_date)
+        # print(start_date)
         routes = Trainroute.objects.filter(train=train).select_related("station").order_by("stop_order")
 
         # now = datetime.strptime(now,"%Y-%m-%d %H:%M:%S")
-        now = datetime.combine(search_date, time(hour=7, minute=32))
+        now = datetime.combine(search_date, time(hour=10, minute=5))
 
         for i, route in enumerate(routes):
             arrival_dt = datetime.combine(start_date, route.arrival_time) + timedelta(days=route.day_offset)
@@ -520,7 +523,7 @@ class TrainTrackingView(APIView):
                     "arrival":f"Expected to reach {route.station.station_name} at {arrival_dt}"
                 })
 
-            if arrival_dt <= now <= departure_dt:
+            if arrival_dt <= now <= departure_dt-timedelta(minutes=1):
                 return Response({
                     "train_name": train.train_name,
                     "status": f"Train is currently at {route.station.station_name} "
@@ -611,7 +614,7 @@ class BookingView(APIView):
 
         day_name = train_start_date.strftime("%A").lower()
 
-        train_schedule_days = train.schedule_days.lower().split(",")
+        train_schedule_days = train.schedule_days
 
         if day_name not in train_schedule_days:
             return Response({"error":"Train doesen't run on this day"},status=status.HTTP_400_BAD_REQUEST)
@@ -624,24 +627,31 @@ class BookingView(APIView):
             booking__journey_date = journey_date,
             booking__from_station__in = stations_before_to,
             booking__to_station__in = stations_after_from,
-            booking__status__in = ["confirmed","train cancelled"], 
+            booking__status__in = ["confirmed","train cancelled"],
+            seat__coach__coach_type = coach_type 
         ).values_list("seat_id",flat=True)
+        # print(f"No:of seats booked:{len(booked)}")
+        # print(f"Total no of seats:{len(seats)}")
 
-        available_seats = []
-        for seat in seats:
-            if seat.id not in booked:
-                available_seats.append(seat)
-        # print(available_seats)
+        available_seats = seats.exclude(id__in = booked)
+
         if no_of_tickets>len(available_seats):
             return Response({"error":"Requested Number of tickets is not available"},status=status.HTTP_400_BAD_REQUEST)
         
+        from_single_route = Trainroute.objects.get(train=train,station = from_station.id)
+        to__single_route = Trainroute.objects.get(train=train,station = to_station.id)
+
+        distance = to__single_route.distance - from_single_route.distance
+        train_coach = TrainCoach.objects.filter(train=train,coach_type=coach_type).first()
+        total_fare = train_coach.base_price + distance*train_coach.fare_per_km
         booking = Booking.objects.create(
             user = request.user,
             train = train,
             from_station_id = from_station.id,
             to_station_id = to_station.id,
             status = "confirmed",
-            journey_date = journey_date
+            journey_date = journey_date,
+            total_fare = total_fare
         )
         # print(booking)
 
@@ -690,7 +700,7 @@ class BookingView(APIView):
         train_start_date = new_journey_date - timedelta(days=from_route.day_offset)
 
         day_name = train_start_date.strftime("%A").lower()
-        train_schedule_days = booking_row.train.schedule_days.lower().split(",")
+        train_schedule_days = booking_row.train.schedule_days
 
         if day_name not in train_schedule_days:
             return Response({"error": "Train doesen't run on this day"}, status=status.HTTP_400_BAD_REQUEST)
@@ -701,26 +711,22 @@ class BookingView(APIView):
                 coach_type=passengers[0].seat.coach.coach_type
             )
             print(coaches)
-            available_seats = []
+            # available_seats = []
+            total_seats = Seat.objects.filter(coach__in = coaches)
 
-            for coach in coaches:
-                total_seats = Seat.objects.filter(coach=coach)
-                print(total_seats)
-                booked = Passenger.objects.filter(
-                    booking__train=booking_row.train,
-                    booking__journey_date=new_journey_date,
-                    booking__status='confirmed',
-                    booking__from_station__in=stations_before_to,
-                    booking__to_station__in=stations_after_from,
-                    seat__coach=coach
-                ).values_list('seat_id', flat=True)
+            booked = Passenger.objects.filter(
+                booking__train=booking_row.train,
+                booking__journey_date=new_journey_date,
+                booking__status__in=['confirmed','train cancelled'],
+                booking__from_station__in=stations_before_to,
+                booking__to_station__in=stations_after_from,
+                seat__coach__coach_type = passengers[0].seat.coach.coach_type
+            ).values_list('seat_id', flat=True)
 
-                for seat in total_seats:
-                    if seat.id not in booked:
-                        available_seats.append(seat.id)
-                        print(available_seats)
-                print(len(available_seats))
-                print(len(passengers))
+            print(len(total_seats))
+            available_seats = total_seats.exclude(id__in = booked).values_list('id',flat=True)
+            print(len(available_seats))
+            print(len(passengers))
 
             if len(passengers) > len(available_seats):
                 return Response(
@@ -752,3 +758,86 @@ class SingleBookingView(APIView):
         serializer = BookingSerializer(booking)
 
         return Response(serializer.data)
+
+class AvailabilityView(APIView):
+
+    def get(self,request):
+        train_number = request.GET.get("train_number")
+        source_from = request.GET.get("from")
+        destination_to = request.GET.get("to")
+        date = request.GET.get("date")
+        coach_type = request.GET.get("coach")
+
+        train = Train.objects.get(train_number=train_number)
+        coaches = TrainCoach.objects.filter(train=train,coach_type=coach_type)
+
+        total_seats = Seat.objects.filter(coach__in = coaches)
+        from_order = Trainroute.objects.get(train=train,station=source_from).stop_order
+        to_order = Trainroute.objects.get(train=train,station=destination_to).stop_order
+        stations_before_to = Trainroute.objects.filter(train=train,stop_order__lt=to_order).values_list('station_id',flat=True)
+        stations_after_from = Trainroute.objects.filter(train=train,stop_order__gt=from_order).values_list('station_id',flat=True)
+        
+        booked = Passenger.objects.filter(
+            booking__train = train,
+            booking__from_station__in = stations_before_to,
+            booking__to_station__in = stations_after_from,
+            booking__journey_date = date,
+            booking__status__in = ['confirmed','train cancelled'] 
+        ).values_list("seat_id",flat=True)
+
+        # print(f"Total seats are:{len(total_seats)}")
+        # print(f"Total booked seats are:{len(booked)}")
+
+        # print(booked)
+        # print(total_seats)
+        available_seats = total_seats.exclude(id__in=booked)
+        # print(len(available_seats))
+
+        return Response({"message":f"There are {len(available_seats)} seats available for booking"})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+# class SampleView(APIView):
+#     permission_classes = []
+
+#     def get(self,request):
+#         train = Train.objects.all()
+#         serializer = SampleSerializer(train,many=True)
+    
+#         return Response(serializer.data)
+
+#     def post(self,request):
+#         serializer = SampleSerializer(data=request.data)
+#         serializer.is_valid(raise_exception=True)
+#         serializer.save()
+#         return Response({"created"})
+    
+#     def put(self,request,train_id):
+#         train = Train.objects.get(id=train_id)
+#         serializer = TrainSerializer(train, request.data)
+#         serializer.is_valid(raise_exception=True)
+#         serializer.save()
+
+#         return Response("Updated",status=status.HTTP_200_OK)
+    
+#     def delete(self,request,train_id):
+#         train = Train.objects.get(id=train_id)
+#         # train.delete()
+#         train.is_active = 0
+#         train.save()
+        
+#         return Response("Deleted Successfully",status=status.HTTP_204_NO_CONTENT)
