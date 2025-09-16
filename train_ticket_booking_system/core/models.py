@@ -65,6 +65,7 @@ class Booking(models.Model):
     journey_date = models.DateField()
     status = models.CharField(max_length=20)
     total_fare = models.FloatField(null=True)
+    booking_date_time = models.DateTimeField(auto_now=True)
 
 class Passenger(models.Model):
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='passengers')

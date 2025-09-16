@@ -1,13 +1,16 @@
 from django.urls import reverse
+from django.db.models import Sum, Avg, Max, Case, When, Value, CharField,Count
 from django.conf import settings
 from rest_framework.pagination import PageNumberPagination
 from .models import Train, TrainCoach, User,Station, Trainroute, Seat, Booking, Passenger
+from django.db.models import Count, Q, F, FloatField, ExpressionWrapper
 from rest_framework.views import APIView
 from rest_framework import viewsets
 from .serializers import TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from rest_framework.response import Response
+from django.db.models.functions import ExtractMonth
 from rest_framework import status
 from datetime import datetime, time, timedelta
 from django.utils import timezone
@@ -191,10 +194,9 @@ class ForgotPasswordOTPView(APIView):
             )
         
             return Response({"message":"OTP has been sent to your mail"})
-
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 
 class VerifyPasswordOTPView(APIView):
     def post(self,request):
-        email = request.data.get('email')
         entered_otp = request.data.get('otp')
 
         serializer = LoginSerializer(data=request.data)
@@ -794,6 +796,220 @@ class AvailabilityView(APIView):
         # print(len(available_seats))
 
         return Response({"message":f"There are {len(available_seats)} seats available for booking"})
+
+class AdminDashboardviewset(viewsets.ModelViewSet):
+    permission_classes = [isAdmin,IsAuthenticated]
+
+    queryset = Booking.objects.all()
+    serializer_class = BookingSerializer
+
+    @action(detail=False,methods=['get'])
+    def statistics(self,request):
+        queryset = self.get_queryset()
+        active_bookings = queryset.filter(status='confirmed').count()
+        cancelled_bookings = queryset.filter(status='cancelled').count()
+        train_cancelled_bookings = queryset.filter(status='train cancelled').count()
+        total_bookings = queryset.count()
+        cancellation_ratio = round((cancelled_bookings/total_bookings)*100,2)
+
+        month_mapping = {1:'January', 2:'February', 3:'March', 4:'April', 5:'May', 6:'June',
+                         7:'July', 8:'August', 9:'September', 10:'October', 11:'November', 12:'December'}
+        
+        month_wise_total_bookings = queryset.annotate(month=ExtractMonth('booking_date_time')).annotate(
+            month_name=Case(
+                *[When(month=i,then=Value(m)) for i,m in month_mapping.items()]
+            )
+        ).values('month_name').annotate(total=Count('id')).order_by('total')
+
+        month_wise_active_bookings = queryset.filter(status='confirmed').annotate(month=ExtractMonth('booking_date_time')).annotate(month_name=Case(
+            *[When(month=i, then=Value(m)) for i, m in month_mapping.items()],
+            output_field=CharField()
+        )).values('month_name').annotate(total=Count('id')).order_by('-total')
+
+        month_wise_cancelled_bookings = queryset.filter(status='cancelled').annotate(month=ExtractMonth('booking_date_time')).annotate(month_name=Case(
+            *[When(month=i, then=Value(m)) for i,m in month_mapping.items()],
+            output_field=CharField())
+        ).values('month_name').annotate(total=Count('id')).order_by('-total')
+
+        month_wise_cancellation_ratio = queryset.annotate(month=ExtractMonth('booking_date_time')).annotate(month_name=Case(
+            *[When(month=i,then=Value(m)) for i,m in month_mapping.items()],
+            output_field=CharField()
+        )).values('month_name').annotate(
+            total_bookings=Count('id'),
+            cancelled_bookings=Count('id',filter=Q(status='cancelled')),
+            cancellation_ratio=ExpressionWrapper(
+                (F('cancelled_bookings') * 100.0) / F('total_bookings'),
+                output_field=FloatField()
+            )
+        ).order_by('month_name')
+
+        if not month_wise_cancelled_bookings:
+            month_wise_cancelled_bookings = "No cancelled bookings"
+
+        if not month_wise_active_bookings:
+            month_wise_active_bookings = "No active bookings"
+        
+        expected_revenue = queryset.aggregate(total=Sum('total_fare'))['total']
+
+        actual_revenue = queryset.filter(status='confirmed').aggregate(total=Sum('total_fare'))['total']
+
+        trains_with_most_bookings = queryset.values('train__train_number','train__train_name').annotate(total=Count('id')).order_by('-total')
+        monthly_actual_revenue = queryset.filter(status='confirmed').annotate(month=ExtractMonth('booking_date_time')).annotate(
+            month_name=Case(
+                *[When(month=i, then=Value(m)) for i,m in month_mapping.items()],
+                output_field=CharField()
+            )
+        ).values('month_name').annotate(total=Sum('total_fare')).order_by('-total')
+
+        monthly_expected_revenue = queryset.annotate(month=ExtractMonth('booking_date_time')).annotate(
+            month_name=Case(
+                *[When(month=i, then=Value(m)) for i,m in month_mapping.items()],
+                output_field=CharField()
+            )
+        ).values('month_name').annotate(total=Sum('total_fare')).order_by('-total')
+
+        return Response({"Total Bookings":total_bookings,
+                         "Active Bookings":active_bookings,
+                         "Cancelled Bookings":cancelled_bookings,
+                         "Train Cancelled Bookings":train_cancelled_bookings,
+                         "Month wise total bookings":month_wise_total_bookings,
+                         "Month wise active bookings":month_wise_active_bookings,
+                         "Month wise cancelled bookings":month_wise_cancelled_bookings,
+                         "Expected Revenue in Total":expected_revenue,
+                         "Actual Revenue":actual_revenue,
+                         "Expected Monthly Revenue":monthly_expected_revenue,
+                         "Actual Monthly Revenue":monthly_actual_revenue,
+                         "Trains with most bookings":trains_with_most_bookings,
+                         "Cancellation Ratio":f'{cancellation_ratio}%',
+                         "Month wise cancellation ratio":month_wise_cancellation_ratio})
+
+    @action(detail=False,methods=['get'])
+    def daily_bookings(self,request):
+
+        today_date = timezone.now().date()
+        queryset = self.get_queryset()
+        bookings = queryset.filter(booking_date_time__date=today_date)
+        serializer = BookingSerializer(bookings,many=True)
+
+        return Response(serializer.data)
+    
+    @action(detail=False,methods=['get'])
+    def daily_cancel_ratio(self,request):
+        queryset = self.get_queryset()
+        today_date = timezone.now().date()
+
+        bookings = queryset.filter(booking_date_time__date=today_date).count()
+        cancelled_bookings = queryset.filter(booking_date_time__date=today_date,status='cancelled').count()    
+        today_cancel_ratio = round((cancelled_bookings/bookings)*100,2)
+
+        yesterday_date = today_date - timedelta(days=1)
+        yesterday_bookings = queryset.filter(booking_date_time__date=yesterday_date).count()
+        yesterday_cancelled_bookings = queryset.filter(booking_date_time__date=yesterday_date,status='cancelled').count()
+        try:
+            yesterday_cancel_ratio = (yesterday_cancelled_bookings/yesterday_bookings)*100
+        except ZeroDivisionError:
+            yesterday_cancel_ratio = "No bookings done yesterday"
+        
+        return Response({"Today's cancellation ratio":{today_cancel_ratio},
+                        "Yesterday's cancellation ratio":{yesterday_cancel_ratio}})
+
+    @action(detail=False,methods=['get'])
+    def daily_revenue(self,request):
+        queryset = self.get_queryset()
+        today_date = timezone.now().date()
+
+        bookings = queryset.filter(booking_date_time__date=today_date,status='confirmed').aggregate(total=Sum('total_fare'))['total']
+
+        yesterdays_date = today_date - timedelta(days=1)
+
+        yesterday_bookings = queryset.filter(booking_date_time__date=yesterdays_date,status='confirmed').aggregate(total=Sum('total_fare'))['total']
+
+        return Response({"Today's Revenue":bookings,
+                         "Yesterday's Revenue":yesterday_bookings})
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 

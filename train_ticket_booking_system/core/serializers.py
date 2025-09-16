@@ -117,7 +117,7 @@ class BookingSerializer(serializers.ModelSerializer):
     to_arrival_time = serializers.SerializerMethodField()
     class Meta:
         model = Booking
-        fields = ['id','journey_date','status','train','from_station','to_station','passengers','from_arrival_time','to_arrival_time'] 
+        fields = ['id','journey_date','status','train','from_station','to_station','passengers','from_arrival_time','to_arrival_time','booking_date_time'] 
 
     def get_from_arrival_time(self,obj):
         route = obj.train.train_route.filter(station=obj.from_station).first()
