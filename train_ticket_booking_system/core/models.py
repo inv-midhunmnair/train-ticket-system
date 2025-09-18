@@ -67,6 +67,12 @@ class Booking(models.Model):
     total_fare = models.FloatField(null=True)
     booking_date_time = models.DateTimeField(auto_now=True)
     email_sent = models.BooleanField(default=False)
+    delay_station = models.ForeignKey(Station,on_delete=models.CASCADE,null=True,blank=True)
+    delay_minutes = models.IntegerField(default=0)
+    delay_email_sent = models.BooleanField(default=False)
+    train_rerouted = models.BooleanField(default=False)
+    reroute_email_sent = models.BooleanField(default=False)
+    rerouted_station = models.ForeignKey(Station,on_delete=models.CASCADE,related_name="rerouted_station",null=True,blank=True)
 
 class Passenger(models.Model):
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='passengers')

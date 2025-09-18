@@ -1,12 +1,13 @@
 from django.urls import reverse
 from django.db.models import Sum, Avg, Max, Case, When, Value, CharField,Count
+from django.db.models.functions import Round
 from django.conf import settings
 from rest_framework.pagination import PageNumberPagination
 from .models import Train, TrainCoach, User,Station, Trainroute, Seat, Booking, Passenger,TrainCancellation
 from django.db.models import Count, Q, F, FloatField, ExpressionWrapper
 from rest_framework.views import APIView
 from rest_framework import viewsets
-from .serializers import RunningTrainSerializer, TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
+from .serializers import RunningTrainSerializer,OTPVerifySerializer, TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from rest_framework.response import Response
@@ -60,6 +61,7 @@ class UserViewset(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def status(self, request, pk=None):
+
         if request.data.get('is_active') == 0:
             user = self.get_object()
             user.is_active = 0
@@ -197,11 +199,11 @@ class ForgotPasswordOTPView(APIView):
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
 class VerifyPasswordOTPView(APIView):
     def post(self,request):
-        entered_otp = request.data.get('otp')
 
-        serializer = LoginSerializer(data=request.data)
+        serializer = OTPVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
+        entered_otp = validated_data['otp']
         try:
             user = User.objects.get(email=validated_data['email'])
         except ObjectDoesNotExist:
@@ -307,7 +309,6 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
         delay = request.data.get("delay")
         station_id = request.data.get("station_id")
         starting_date = request.data.get("date")
-        station = Station.objects.get(id=station_id)
 
         if not delay or not station_id or not starting_date:
             return Response({"error":"need to enter delay and the station and the date"},status=status.HTTP_400_BAD_REQUEST)
@@ -324,24 +325,54 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
         for i in range(last_offset+1):
             dates = [train_start_date+timedelta(days=i)]
         
-        bookings = Booking.objects.filter(
+        Booking.objects.filter(
             train=train,
             status='confirmed',
             from_station__in = from_routes,
             to_station__in = to_routes,
             journey_date__in = dates
-        )
+        ).update(delay_minutes=delay, delay_email_sent=False,delay_station=station_id)
 
-        for booking in bookings:
-            send_mail(
-                'Notification about Train',
-                f'Informing you that your train {booking.train.train_name}({booking.train.train_number}) with booking {booking.id} is delayed at {station.station_name} by {delay} minutes sorry for the inconvenience',
-                settings.DEFAULT_FROM_EMAIL,
-                [booking.user.email],
-                fail_silently=False
-            )
-        # print(booking)
         return Response({"message":"Successfully applied delay"})
+    
+    @action(detail=True, methods=['get'])
+    def reroute(self,request,pk=None):
+        train = self.get_object()
+        train_start_date = request.data.get("date")
+        stations = request.data.get("stations")
+
+        if not train_start_date or not stations:
+            return Response({"error":"need to enter date and stations"},status=status.HTTP_400_BAD_REQUEST)
+
+        train_start_date = datetime.strptime(train_start_date,"%Y-%m-%d")
+
+        routes = Trainroute.objects.filter(train=train,station__in = stations)
+
+        if not routes:
+            return Response({"error":"No such stations in this train route"},status=status.HTTP_400_BAD_REQUEST)    
+        
+        last_route = Trainroute.objects.filter(train=train).last()
+        last_offset = last_route.day_offset
+
+        dates = []
+
+        for i in range(last_offset+1):
+            dates.append(train_start_date+timedelta(days=i))
+        
+        for station in stations:
+            station_stop_order = routes.get(station=station).stop_order
+            from_routes = Trainroute.objects.filter(train=train,stop_order__lte=station_stop_order).values('station')
+            to_routes = Trainroute.objects.filter(train=train,stop_order__gte=station_stop_order).values('station')
+
+            bookings = Booking.objects.filter(
+                train=train,
+                journey_date__in = dates,
+                from_station__in = from_routes,
+                to_station__in = to_routes,
+                status = 'confirmed'
+            ).update(train_rerouted=True,rerouted_station=station)
+
+        return Response({"message":"Successfully sent rerouting mails"})
     
 class StationViewset(viewsets.ModelViewSet):    
     permission_classes = [IsAuthenticated, isAdmin]
@@ -441,7 +472,7 @@ class SearchResultsview(APIView):
             distance = to_route.distance - from_route.distance
 
             coaches = TrainCoach.objects.filter(train=train,coach_type=coach_type)
-            print(coaches)
+            # print(coaches)
             for coach in coaches:
                 total_price = coach.base_price + (distance * coach.fare_per_km)
                 if min_price <= total_price <= max_price:
@@ -471,7 +502,7 @@ class TrainTrackingView(APIView):
     def get(self, request):
         train_no = request.GET.get("train_number")
         date = request.GET.get("date")  
-        # now = request.GET.get("datetime")
+        now = request.GET.get("datetime")
 
         if not train_no or not date:
             return Response({"error": "train_number and date are required"},
@@ -492,8 +523,9 @@ class TrainTrackingView(APIView):
         # print(start_date)
         routes = Trainroute.objects.filter(train=train).select_related("station").order_by("stop_order")
 
-        # now = datetime.strptime(now,"%Y-%m-%d %H:%M:%S")
-        now = datetime.combine(search_date, time(hour=10, minute=5))
+        # now = datetime.combine(search_date, time(hour=10, minute=5))
+
+        now = datetime.strptime(now,"%Y-%m-%d %H:%M:%S")
 
         for i, route in enumerate(routes):
             arrival_dt = datetime.combine(start_date, route.arrival_time) + timedelta(days=route.day_offset)
@@ -693,7 +725,7 @@ class BookingView(APIView):
                 train=booking_row.train,
                 coach_type=passengers[0].seat.coach.coach_type
             )
-            print(coaches)
+            # print(coaches)
             # available_seats = []
             total_seats = Seat.objects.filter(coach__in = coaches)
 
@@ -706,10 +738,10 @@ class BookingView(APIView):
                 seat__coach__coach_type = passengers[0].seat.coach.coach_type
             ).values_list('seat_id', flat=True)
 
-            print(len(total_seats))
+            # print(len(total_seats))
             available_seats = total_seats.exclude(id__in = booked).values_list('id',flat=True)
-            print(len(available_seats))
-            print(len(passengers))
+            # print(len(available_seats))
+            # print(len(passengers))
 
             if len(passengers) > len(available_seats):
                 return Response(
@@ -818,8 +850,9 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         )).values('month_name').annotate(
             total_bookings=Count('id'),
             cancelled_bookings=Count('id',filter=Q(status='cancelled')),
-            cancellation_ratio=ExpressionWrapper(
+            cancellation_ratio=Round(
                 (F('cancelled_bookings') * 100.0) / F('total_bookings'),
+                2,
                 output_field=FloatField()
             )
         ).order_by('month_name')
@@ -862,7 +895,7 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
                          "Actual Monthly Revenue":monthly_actual_revenue,
                          "Trains with most bookings":trains_with_most_bookings,
                          "Cancellation Ratio":f'{cancellation_ratio}%',
-                         "Month wise cancellation ratio":month_wise_cancellation_ratio})
+                         "Month wise cancellation ratio":month_wise_cancellation_ratio},status=status.HTTP_200_OK)
 
     @action(detail=False,methods=['get'])
     def daily_bookings(self,request):
@@ -931,6 +964,8 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         # print(trains_running_today)
 
         trains = Train.objects.filter(id__in=trains_running_today)
+        if not trains:
+            return Response({"message":"No trains are running today"},status=status.HTTP_200_OK)
         
         paginator = PageNumberPagination()
         paginator.page_size = 5

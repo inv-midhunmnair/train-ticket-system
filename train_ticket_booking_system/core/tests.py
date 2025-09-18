@@ -3,12 +3,13 @@ from django.utils import timezone
 from django.test import TestCase
 from rest_framework.test import APIRequestFactory,force_authenticate
 from rest_framework import status
+from django.contrib.auth.tokens import default_token_generator
 from rest_framework import serializers
 
 from .validators import validate_name
-from .models import User,Booking,Train,Station,TrainCoach,Seat,Passenger,Trainroute
+from .models import TrainCancellation, User,Booking,Train,Station,TrainCoach,Seat,Passenger,Trainroute
 from .serializers import TrainSearchSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
-from .views import ForgotPasswordOTPView,BookingView,VerifyOTPView,LoginOTPView,VerifyPasswordOTPView, SingleBookingView, StationViewset, TrainDetailsViewset, TrainTrackingView, TrainroutesViewset, UserViewset,VerifyEmailView,GetUserViewset,SearchResultsview
+from .views import AdminDashboardviewset, ForgotPasswordOTPView,BookingView,VerifyOTPView,LoginOTPView,VerifyPasswordOTPView, SingleBookingView, StationViewset, TrainDetailsViewset, TrainTrackingView, TrainroutesViewset, UserViewset,VerifyEmailView,GetUserViewset,SearchResultsview
 
 # Create your tests here.
 
@@ -43,7 +44,6 @@ class SingleBookingViewTest(TestCase):
 
         self.coach = TrainCoach.objects.create(
             train=self.train,
-            capacity=72,
             coach_type="sleeper",
             coach_number="S2",
             base_price=200,
@@ -158,7 +158,6 @@ class BookingViewTest(TestCase):
 
         self.coach = TrainCoach.objects.create(
             train=self.train,
-            capacity=72,
             coach_type="sleeper",
             coach_number="S2",
             base_price=200,
@@ -323,7 +322,6 @@ class SearchResultsviewTest(TestCase):
 
         self.coach = TrainCoach.objects.create(
             train=self.train,
-            capacity=72,
             coach_type="sleeper",
             coach_number="S2",
             base_price=200,
@@ -429,7 +427,6 @@ class TrainTrackingViewTest(TestCase):
             "train_number":12625,
             "date": '2025-09-01',
             "datetime":"2025-09-01 08:40:00"
-
         }
         request = self.factory.get('/users/status/',data=params)
         view = TrainTrackingView.as_view()
@@ -496,8 +493,8 @@ class VerifyPasswordOTPViewTest(TestCase):
     
     def test_password_verify_post_email_fail(self):
         data = {
-            "email":"",
-            "otp":""
+            "email":"sdf@gmail.com",
+            "otp":3453
         }
 
         request = self.factory.post('/verify-password-otp',data)
@@ -672,14 +669,13 @@ class TrainDetailsViewTest(TestCase):
         data = {
             "train_name":"new train",
             "train_number":12039,
-            "schedule_days":"monday,wednesday,friday"
+            "schedule_days":'["monday","wednesday","friday"]'
         }
         request = self.factory.post('users/trains',data)
         force_authenticate(request,user=self.user)
         view = TrainDetailsViewset.as_view({'post':'create'})
         response = view(request)
 
-        # print(response.data)
         self.assertIn("Successfully added train",response.data['message'])
         self.assertEqual(response.status_code,status.HTTP_201_CREATED)
     
@@ -777,3 +773,169 @@ class ValidateNameTest(TestCase):
         with self.assertRaises(serializers.ValidationError) as e:
             validate_name("v")
         self.assertIn("more than 2 characters",str(e.exception))
+
+class AdminDashboardviewsetTest(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+        self.user = self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password='password123',
+            role=1, 
+            username="testuser",
+            first_name="Test",
+            last_name="User",
+            phone_number="1234567890",
+            is_email_verified = 1
+        )
+
+        self.train = Train.objects.create(
+            train_name="Mangala Lakshwadeep",
+            train_number=12625,
+            schedule_days=["thursday", "saturday"]
+        )
+        self.train1 = Train.objects.create(
+            train_name="Mangaldweep",
+            train_number=12624,
+            schedule_days=["monday","friday", "saturday"]
+        )
+
+        self.from_station = Station.objects.create(
+            station_name="Aluva",
+            station_code="ALV"
+        )
+        self.to_station = Station.objects.create(
+            station_name="Thrissur",
+            station_code="TCR"
+        )
+        Trainroute.objects.create(train=self.train, stop_order=1, day_offset=0,arrival_time='8:30',departure_time='8:45',station_id=self.from_station.id)
+
+        self.booking = Booking.objects.create(
+            user=self.user,
+            train=self.train,
+            from_station=self.from_station,
+            to_station=self.to_station,
+            journey_date=date(2025, 9, 8),
+            status="confirmed"
+        )
+
+        self.cancellation = TrainCancellation.objects.create(
+            train=self.train,
+            cancellation_date=date(2025,9,2)
+        )
+        self.cancellation1 = TrainCancellation.objects.create(
+            train=self.train1,
+            cancellation_date=date(2025,9,5)
+        )
+
+    def test_statistics_get(self):
+        
+        request = self.factory.get('users/admin-dashboard/statistics')
+        force_authenticate(request,user=self.user)
+
+        view = AdminDashboardviewset.as_view({'get':'statistics'})
+        response = view(request)
+        self.assertEqual(response.status_code,status.HTTP_200_OK)
+        self.assertEqual(response.data['Total Bookings'],1)
+    
+    def test_daily_reports_get(self):
+        request = self.factory.get('users/admin-dashboard/daily_reports')
+        force_authenticate(request,user=self.user)
+
+        view = AdminDashboardviewset.as_view({'get':'daily_reports'})
+        response = view(request)
+        self.assertEqual(response.status_code,status.HTTP_200_OK)
+        self.assertIn(0.0,response.data["Today's cancellation ratio"])
+
+    def test_running_trains_success_get(self):
+        request = self.factory.get('users/admin-dashboard/running_trains')
+        force_authenticate(request,user=self.user)
+
+        view = AdminDashboardviewset.as_view({'get':'running_trains'})
+        response = view(request)
+        self.assertEqual(response.status_code,status.HTTP_200_OK)
+        self.assertEqual(self.train.train_name,response.data['results'][0]['train_name'])
+    
+class VerifyEmailViewTest(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+        self.user = self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password='password123',
+            role=1, 
+            username="testuser",
+            first_name="Test",
+            last_name="User",
+            phone_number="1234567890",
+            is_email_verified = 1
+        )
+    
+    def test_verify_email_success_get(self):
+        token = default_token_generator.make_token(self.user)
+        uid = self.user.id
+
+        request = self.factory.get(f'verify-email/?uid={uid}&token={token}')
+        view = VerifyEmailView.as_view()
+        response = view(request)
+
+        self.assertEqual(response.data['message'],'Email verified successfully!')
+        self.assertEqual(response.status_code,status.HTTP_200_OK)
+    
+    def test_verify_email_uid_fail_get(self):
+        token = default_token_generator.make_token(self.user)
+        uid = 100
+
+        request = self.factory.get(f'verify-email/?uid={uid}&token={token}')
+        view = VerifyEmailView.as_view()
+        response = view(request)
+
+        self.assertEqual(response.data,{'error': 'Invalid UID'})
+        self.assertEqual(response.status_code,status.HTTP_400_BAD_REQUEST)
+    
+    def test_verify_email_uid_absent_get(self):
+        token = default_token_generator.make_token(self.user)
+        request = self.factory.get(f'verify-email/?token={token}')
+        view = VerifyEmailView.as_view()
+        response = view(request)
+
+        self.assertEqual(response.data,{'error': "UID and token are required"})
+        self.assertEqual(response.status_code,status.HTTP_400_BAD_REQUEST)
+
+class UserStatusChangeTest(TestCase):
+
+    def setUp(self):
+        self.factory = APIRequestFactory()
+
+        self.user = User.objects.create_user(
+            email='testuser@example.com',
+            password='password123',
+            role=1, 
+            username="testuser",
+            first_name="Test",
+            last_name="User",
+            phone_number="1234567890",
+            is_email_verified = 1
+        )
+
+        self.user1 = User.objects.create_user(
+            email='estuser@example.com',
+            password='password123',
+            role=0, 
+            is_active=1,
+            username="estuser",
+            first_name="Test",
+            last_name="User",
+            phone_number="1334567890",
+            is_email_verified = 1
+        )
+    
+    def test_change_user_status_success_post(self):
+
+        request = self.factory.post(f'users/users/{self.user.id}/status',data={"is_active":0})
+
+        view = UserViewset.as_view({'post': 'status'})
+        response = view(request,pk=self.user.id)
+
+        self.assertEqual(response.data['message'],"successfully changed the status")
+        self.assertEqual(response.status_code,status.HTTP_200_OK)

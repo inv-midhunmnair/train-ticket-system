@@ -150,6 +150,10 @@ class NewbookingSerializer(serializers.Serializer):
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
 
+class OTPVerifySerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    otp = serializers.IntegerField()
+    
 # class SampleSerializer(serializers.ModelSerializer):
 #     class Meta:
 #         model = Train
