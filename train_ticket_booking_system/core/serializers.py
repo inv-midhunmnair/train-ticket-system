@@ -70,6 +70,12 @@ class TrainSerializer(serializers.ModelSerializer):
         model = Train
         fields = ['train_name','train_number','schedule_days','is_active']
 
+class RunningTrainSerializer(serializers.ModelSerializer):
+
+    class Meta:
+        model = Train
+        fields = ['train_name','train_number','schedule_days']
+        
 class TrainSearchSerializer(serializers.ModelSerializer):
 
     train = TrainSerializer(read_only=True)

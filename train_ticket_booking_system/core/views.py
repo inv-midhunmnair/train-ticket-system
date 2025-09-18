@@ -2,11 +2,11 @@ from django.urls import reverse
 from django.db.models import Sum, Avg, Max, Case, When, Value, CharField,Count
 from django.conf import settings
 from rest_framework.pagination import PageNumberPagination
-from .models import Train, TrainCoach, User,Station, Trainroute, Seat, Booking, Passenger
+from .models import Train, TrainCoach, User,Station, Trainroute, Seat, Booking, Passenger,TrainCancellation
 from django.db.models import Count, Q, F, FloatField, ExpressionWrapper
 from rest_framework.views import APIView
 from rest_framework import viewsets
-from .serializers import TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
+from .serializers import RunningTrainSerializer, TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from rest_framework.response import Response
@@ -285,31 +285,20 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'])
     def deactivate(self,request,pk=None):
         train = self.get_object()
-        # train.is_active = False
-        # train.save()
         date = request.data.get("date")
         
         train_start_date = datetime.strptime(date, "%Y-%m-%d")
         dates = []
-        routes = Trainroute.objects.filter(train=train)
+        routes = Trainroute.objects.filter(train=train).order_by('day_offset')
         last_offset = routes.last().day_offset
+        
+        TrainCancellation.objects.get_or_create(train=train,cancellation_date=date)
 
         for i in range(last_offset+1):
             dates.append(train_start_date+timedelta(days=i))
         
-        bookings = Booking.objects.filter(train=train,status='confirmed', journey_date__in = dates)
-        
-        for booking in bookings:
-            send_mail(
-                'Notification about Train',
-                f'Informing you that your train with booking:{booking.id} for {booking.train.train_name}({booking.train.train_number})on {booking.journey_date} has been cancelled,sorry for the inconvenience',
-                settings.DEFAULT_FROM_EMAIL,
-                [booking.user.email],
-                fail_silently=False
-            )
-            booking.status="train cancelled"
-            booking.save()
-        
+        Booking.objects.filter(train=train,status='confirmed', journey_date__in = dates).update(status="train cancelled", email_sent=False)
+    
         return Response({"message":"Successfully cancelled the train"})
     
     @action(detail=True,methods=['post'])
@@ -433,14 +422,6 @@ class SearchResultsview(APIView):
 
                 queryset = queryset.filter(train_id__in = valid_train_ids, train__schedule_days__icontains = day_name)
 
-            elif date:
-                date = datetime.strptime(date,"%Y-%m-%d")
-                # print(date)
-
-                day_name = date.strftime("%A")
-                # print(day_name)
-
-                queryset = queryset.filter(train__schedule_days__icontains = day_name)
             elif source_from and destination_to:
                 queryset = queryset.filter(train_id__in=matching_train_id)
 
@@ -888,13 +869,15 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
 
         today_date = timezone.now().date()
         queryset = self.get_queryset()
-        bookings = queryset.filter(booking_date_time__date=today_date)
+        bookings = queryset.filter(booking_date_time__date=today_date,status='confirmed')
+        if not bookings:
+            return Response({"error":"No bookings done today"})
         serializer = BookingSerializer(bookings,many=True)
 
         return Response(serializer.data)
     
     @action(detail=False,methods=['get'])
-    def daily_cancel_ratio(self,request):
+    def daily_reports(self,request):
         queryset = self.get_queryset()
         today_date = timezone.now().date()
 
@@ -905,32 +888,60 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         yesterday_date = today_date - timedelta(days=1)
         yesterday_bookings = queryset.filter(booking_date_time__date=yesterday_date).count()
         yesterday_cancelled_bookings = queryset.filter(booking_date_time__date=yesterday_date,status='cancelled').count()
+
+        today_confirmed_revenue = queryset.filter(booking_date_time__date=today_date,status='confirmed').aggregate(total=Sum('total_fare'))['total']
+        yesterday_confirmed_revenue = queryset.filter(booking_date_time__date=yesterday_date,status='confirmed').aggregate(total=Sum('total_fare'))['total']
+
+        if today_confirmed_revenue is None:
+            today_confirmed_revenue = "No confirmed bookings today"
+        if yesterday_confirmed_revenue is None:
+            yesterday_confirmed_revenue = "No confirmed bookings yesterday"
         try:
             yesterday_cancel_ratio = (yesterday_cancelled_bookings/yesterday_bookings)*100
         except ZeroDivisionError:
             yesterday_cancel_ratio = "No bookings done yesterday"
         
         return Response({"Today's cancellation ratio":{today_cancel_ratio},
-                        "Yesterday's cancellation ratio":{yesterday_cancel_ratio}})
-
+                        "Yesterday's cancellation ratio":{yesterday_cancel_ratio},
+                        "Today's confirmed revenue":today_confirmed_revenue,
+                        "Yesterday's confirmed revenue":yesterday_confirmed_revenue,})
+    
     @action(detail=False,methods=['get'])
-    def daily_revenue(self,request):
-        queryset = self.get_queryset()
+    def running_trains(self,request):
         today_date = timezone.now().date()
+        # today_date = datetime(2025,9,11).date()
 
-        bookings = queryset.filter(booking_date_time__date=today_date,status='confirmed').aggregate(total=Sum('total_fare'))['total']
+        cancelled_trains = TrainCancellation.objects.filter(cancellation_date=today_date).values_list('train_id')
+        # print(cancelled_trains)
 
-        yesterdays_date = today_date - timedelta(days=1)
+        trains_with_offset = Train.objects.exclude(id__in=cancelled_trains).annotate(max_day_offset=Max('train_route__day_offset')).values('id','max_day_offset','schedule_days')
+        # print(trains_with_offset)
 
-        yesterday_bookings = queryset.filter(booking_date_time__date=yesterdays_date,status='confirmed').aggregate(total=Sum('total_fare'))['total']
+        trains_running_today = []
 
-        return Response({"Today's Revenue":bookings,
-                         "Yesterday's Revenue":yesterday_bookings})
+        for i in range(7):
+            check_date = today_date - timedelta(days=i)
+            check_day_name = check_date.strftime("%A").lower()
 
+            record = trains_with_offset.filter(schedule_days__icontains=check_day_name,max_day_offset__gte=i).values_list('id',flat=True)
 
+            if record.exists():
+                trains_running_today.extend(j for j in record)
+            
+        # print(trains_running_today)
 
+        trains = Train.objects.filter(id__in=trains_running_today)
+        
+        paginator = PageNumberPagination()
+        paginator.page_size = 5
 
+        paginated_queryset = paginator.paginate_queryset(trains,request)
+        serializer = RunningTrainSerializer(paginated_queryset,many=True)
+        return paginator.get_paginated_response(serializer.data)
 
+        
+
+        
 
 
 

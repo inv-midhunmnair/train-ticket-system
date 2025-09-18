@@ -66,6 +66,7 @@ class Booking(models.Model):
     status = models.CharField(max_length=20)
     total_fare = models.FloatField(null=True)
     booking_date_time = models.DateTimeField(auto_now=True)
+    email_sent = models.BooleanField(default=False)
 
 class Passenger(models.Model):
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='passengers')
@@ -76,3 +77,11 @@ class Passenger(models.Model):
 
     def __str__(self):
         return f"{self.seat.coach}"
+
+class TrainCancellation(models.Model):
+    train = models.ForeignKey(Train, on_delete=models.CASCADE)
+    cancellation_date = models.DateField()
+
+    class Meta:
+        unique_together = ('train','cancellation_date')
+    
