@@ -90,4 +90,4 @@ class TrainCancellation(models.Model):
 
     class Meta:
         unique_together = ('train','cancellation_date')
-    
+

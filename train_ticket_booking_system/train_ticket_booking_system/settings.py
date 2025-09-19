@@ -39,7 +39,8 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'core',
-    'rest_framework'
+    'rest_framework',
+    'payment'
 ]
 
 MIDDLEWARE = [
@@ -81,7 +82,7 @@ EMAIL_HOST_PASSWORD = 'ytul olye zxva akqk'
 
 REST_FRAMEWORK = {
     "DEFAULT_PAGINATION_CLASS": "rest_framework.pagination.PageNumberPagination",
-    "PAGE_SIZE": 5,
+    "PAGE_SIZE": 10,
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework_simplejwt.authentication.JWTAuthentication",
     ],
@@ -143,3 +144,6 @@ SIMPLE_JWT = {
         'REFRESH_TOKEN_LIFETIME': timedelta(days=7),    # Example: 7 days
 
     }
+
+RAZORPAY_KEY_ID = "rzp_test_RJLri6YlIlM4IP"
+RAZORPAY_KEY_SECRET = "HFoMuI2F7fLXsCU9aAaWU17Y"

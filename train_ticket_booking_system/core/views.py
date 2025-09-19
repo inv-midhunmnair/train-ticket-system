@@ -502,7 +502,6 @@ class TrainTrackingView(APIView):
     def get(self, request):
         train_no = request.GET.get("train_number")
         date = request.GET.get("date")  
-        now = request.GET.get("datetime")
 
         if not train_no or not date:
             return Response({"error": "train_number and date are required"},
@@ -523,10 +522,9 @@ class TrainTrackingView(APIView):
         # print(start_date)
         routes = Trainroute.objects.filter(train=train).select_related("station").order_by("stop_order")
 
-        # now = datetime.combine(search_date, time(hour=10, minute=5))
+        now = datetime.combine(search_date, time(hour=8, minute=5))
 
-        now = datetime.strptime(now,"%Y-%m-%d %H:%M:%S")
-
+        # now = datetime.now()
         for i, route in enumerate(routes):
             arrival_dt = datetime.combine(start_date, route.arrival_time) + timedelta(days=route.day_offset)
             departure_dt = datetime.combine(start_date, route.departure_time) + timedelta(days=route.day_offset)
@@ -664,7 +662,7 @@ class BookingView(APIView):
             train = train,
             from_station_id = from_station.id,
             to_station_id = to_station.id,
-            status = "confirmed",
+            status = "pending",
             journey_date = journey_date,
             total_fare = total_fare
         )
@@ -678,6 +676,7 @@ class BookingView(APIView):
                 passenger_gender = passenger['gender'],
                 seat = available_seats[i]
             )
+            
         send_booking_email(booking,train_start_date,from_arrival_time,to_arrival_time,to_date)
         return Response({"message":f"Successfully booked {no_of_tickets} tickets,tickets have been sent to your mail"})
     
@@ -867,7 +866,7 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
 
         actual_revenue = queryset.filter(status='confirmed').aggregate(total=Sum('total_fare'))['total']
 
-        trains_with_most_bookings = queryset.values('train__train_number','train__train_name').annotate(total=Count('id')).order_by('-total')
+        trains_with_most_bookings = queryset.values('train__train_number','train__train_name').annotate(total=Count('id')).order_by('-total')[:5]
         monthly_actual_revenue = queryset.filter(status='confirmed').annotate(month=ExtractMonth('booking_date_time')).annotate(
             month_name=Case(
                 *[When(month=i, then=Value(m)) for i,m in month_mapping.items()],
@@ -974,7 +973,7 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         serializer = RunningTrainSerializer(paginated_queryset,many=True)
         return paginator.get_paginated_response(serializer.data)
 
-        
+ 
 
         
 
