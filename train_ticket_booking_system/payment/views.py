@@ -113,7 +113,14 @@ class RefundView(APIView):
 
         payment = Payment.objects.get(booking=booking)
 
+        if booking.status != 'cancelled':
+            return Response({"error":"This booking is still active so refund is not possible"})
+
         refund_amount = ((booking.total_fare)*(booking.cancellation_percentage/100))-SERVICE_CHARGE
+
+        if booking.total_fare<SERVICE_CHARGE:
+            refund_amount = 0
+            
         refund_amount_paise = refund_amount*100
         print(refund_amount)
         client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID,settings.RAZORPAY_KEY_SECRET))

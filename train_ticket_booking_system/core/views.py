@@ -356,7 +356,7 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
 
         last_offset = Trainroute.objects.filter(train=train).last().day_offset
         dates = [train_start_date + timedelta(days=i) for i in range(last_offset + 1)]
-
+ 
         total_train_stations = list(
             Trainroute.objects.filter(train=train)
             .order_by("stop_order")
@@ -400,7 +400,6 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
 
         return Response({"message": "Successfully sent rerouting mails"})
 
-    
 class StationViewset(viewsets.ModelViewSet):    
     permission_classes = [IsAuthenticated, isAdmin]
 
@@ -768,7 +767,7 @@ class BookingView(APIView):
         print(time_difference)
         booking.save()
 
-        # send_cancel_mail(booking)
+        send_cancel_mail(booking)
         return Response({"message":f"Your booking with booking id {booking.id} has been cancelled successfully"})
 
     def put(self, request, booking_id):
