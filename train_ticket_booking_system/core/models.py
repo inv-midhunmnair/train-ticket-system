@@ -69,6 +69,7 @@ class Booking(models.Model):
     email_sent = models.BooleanField(default=False)
     delay_station = models.ForeignKey(Station,on_delete=models.CASCADE,null=True,blank=True)
     delay_minutes = models.IntegerField(default=0)
+    cancellation_percentage = models.IntegerField(default=0)
     delay_email_sent = models.BooleanField(default=False)
     train_rerouted = models.BooleanField(default=False)
     reroute_email_sent = models.BooleanField(default=False)

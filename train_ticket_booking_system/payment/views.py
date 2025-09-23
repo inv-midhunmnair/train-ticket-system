@@ -3,19 +3,21 @@ from django.conf import settings
 from rest_framework.response import Response
 from core.models import Booking
 from rest_framework.views import APIView
-from .models import Payment
+from .models import Payment, Refund
 from core.models import Trainroute
 from razorpay.errors import SignatureVerificationError
 from rest_framework import status
-import hmac
-import hashlib
+from rest_framework.permissions import IsAuthenticated
 from utils.send_ticket_mail import send_booking_email
 from datetime import timedelta
+from datetime import datetime
 
 # Create your views here.
 
 class PaymentInitiateView(APIView):
 
+    permission_classes = [IsAuthenticated]
+    
     def post(self,request):
 
         booking_id = request.data.get("booking_id")
@@ -53,6 +55,8 @@ class PaymentInitiateView(APIView):
 
 class VerifyPaymentView(APIView):
 
+    permission_classes = [IsAuthenticated]
+    
     def post(self,request):
         razorpay_order_id = request.data.get("razorpay_order_id")
         razorpay_payment_id = request.data.get("razorpay_payment_id")
@@ -97,6 +101,35 @@ class VerifyPaymentView(APIView):
         except SignatureVerificationError:
             return Response({"error":"Signature verification failed"},status=status.HTTP_400_BAD_REQUEST)
 
+class RefundView(APIView):
+    
+    def delete(self,request):
 
+        SERVICE_CHARGE = 10
 
-            
+        booking_id = request.data.get("booking_id")
+
+        booking = Booking.objects.get(id=booking_id)
+
+        payment = Payment.objects.get(booking=booking)
+
+        refund_amount = ((booking.total_fare)*(booking.cancellation_percentage/100))-SERVICE_CHARGE
+        refund_amount_paise = refund_amount*100
+        print(refund_amount)
+        client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID,settings.RAZORPAY_KEY_SECRET))
+
+        refund = client.payment.refund(
+            payment.payment_id,
+            {"amount":refund_amount_paise}
+        )
+
+        Refund.objects.create(
+            booking=booking,
+            payment=payment,
+            refund_amount = refund_amount,
+            refund_id = refund.get("id"),
+            status = refund.get("status")
+        )
+
+        return Response({"message":"Refund Successful"})
+        

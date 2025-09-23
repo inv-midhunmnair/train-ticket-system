@@ -1,3 +1,4 @@
+from itertools import groupby
 from django.urls import reverse
 from django.db.models import Sum, Avg, Max, Case, When, Value, CharField,Count
 from django.db.models.functions import Round
@@ -520,8 +521,34 @@ class SearchResultsview(APIView):
         paginator.page_size = 5
 
         paginated_queryset = paginator.paginate_queryset(queryset,request)
-        serializer = TrainSearchSerializer(paginated_queryset, many=True)
-        return paginator.get_paginated_response(serializer.data)
+        
+        paginated_queryset.sort(key=lambda x: x.train.id)
+
+        grouped_result = []
+        for train, train_routes in groupby(paginated_queryset, key=lambda x: x.train):
+            grouped_result.append({
+                "train_name": train.train_name,
+                "train_number": train.train_number,
+                "schedule_days": train.schedule_days,
+                "is_active": train.is_active,
+                "routes": [
+                    {
+                        "stop_order": r.stop_order,
+                        "arrival_time": r.arrival_time,
+                        "departure_time": r.departure_time,
+                        "day_offset": r.day_offset,
+                        "distance": r.distance,
+                        "station": {
+                            "id": r.station.id,
+                            "station_code": r.station.station_code,
+                            "station_name": r.station.station_name
+                        }
+                    }
+                    for r in train_routes
+                ]
+            })
+
+        return paginator.get_paginated_response(grouped_result)
 
 class TrainTrackingView(APIView):
     
@@ -709,12 +736,39 @@ class BookingView(APIView):
     
     def delete(self,request,booking_id):
 
-        booking = Booking.objects.get(id=booking_id, user=request.user)
+        now = datetime.today()
 
+        booking = Booking.objects.get(id=booking_id, user=request.user)
+        from_route = Trainroute.objects.get(train=booking.train,station = booking.from_station)
+        
+        first_route = Trainroute.objects.filter(train=booking.train).order_by('stop_order').first()
+        train_start_time = first_route.arrival_time
+        start_date = booking.journey_date - timedelta(days=from_route.day_offset)
+
+        train_start_date = datetime.combine(start_date,train_start_time)
+        
+        print(train_start_date)
+        print(now)
         booking.status = "cancelled"
+        
+        time_difference = ((train_start_date - now).total_seconds())/3600
+
+        if time_difference<0:
+            return Response({"error":"Train already started cancellation unavailable"})
+
+        if time_difference>48:
+            booking.cancellation_percentage = 100
+
+        elif 48>=time_difference>24:
+            booking.cancellation_percentage = 50
+
+        else:
+            booking.cancellation_percentage = 0
+        
+        print(time_difference)
         booking.save()
 
-        send_cancel_mail(booking)
+        # send_cancel_mail(booking)
         return Response({"message":f"Your booking with booking id {booking.id} has been cancelled successfully"})
 
     def put(self, request, booking_id):
@@ -996,8 +1050,6 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
             if record.exists():
                 trains_running_today.extend(j for j in record)
             
-        # print(trains_running_today)
-
         trains = Train.objects.filter(id__in=trains_running_today)
         
         data =[]
@@ -1026,8 +1078,7 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         paginator = PageNumberPagination()
         paginator.page_size = 5
 
-        paginated_queryset = paginator.paginate_queryset(data,request)
-        # serializer = RunningTrainSerializer(paginated_queryset,many=True)
+        paginator.paginate_queryset(data,request)
         return paginator.get_paginated_response(data)
 
  
