@@ -73,6 +73,8 @@ class Booking(models.Model):
     train_rerouted = models.BooleanField(default=False)
     reroute_email_sent = models.BooleanField(default=False)
     rerouted_station = models.ForeignKey(Station,on_delete=models.CASCADE,related_name="rerouted_station",null=True,blank=True)
+    boarding_station = models.ForeignKey(Station,on_delete=models.CASCADE,null=True,blank=True,related_name='boarding')
+    get_off_station = models.ForeignKey(Station,on_delete=models.CASCADE,related_name="get_off",blank=True,null=True)
 
 class Passenger(models.Model):
     booking = models.ForeignKey(Booking, on_delete=models.CASCADE, related_name='passengers')

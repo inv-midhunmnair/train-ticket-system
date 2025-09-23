@@ -1,7 +1,8 @@
 from .models import Booking, Passenger, Seat, TrainCoach, User, Train, Station, Trainroute
 from rest_framework import serializers
 from .validators import *
-
+from rest_framework.response import Response
+from rest_framework import status
 class UserSerializer(serializers.ModelSerializer):
 
     role_display = serializers.SerializerMethodField()
@@ -56,9 +57,11 @@ class TrainrouteSerializer(serializers.ModelSerializer):
         fields = '__all__'
     
     def create(self, validated_data):
+        validate_train_time(validated_data)
         route,created_bool = Trainroute.objects.get_or_create(**validated_data)
         if not created_bool:
             raise serializers.ValidationError({"error":"row already exists"})
+        
         return route
 
 class TrainSerializer(serializers.ModelSerializer):
@@ -153,7 +156,16 @@ class LoginSerializer(serializers.Serializer):
 class OTPVerifySerializer(serializers.Serializer):
     email = serializers.EmailField()
     otp = serializers.IntegerField()
+
+class DailyBookingSerializer(serializers.ModelSerializer):
+    train = BookingTrainSerializer()
+    from_station = BookingStationSerializer()
+    to_station = BookingStationSerializer()
     
+    class Meta:
+        model = Booking
+        fields = ['id','journey_date','status','train','from_station','to_station','booking_date_time'] 
+
 # class SampleSerializer(serializers.ModelSerializer):
 #     class Meta:
 #         model = Train

@@ -6,7 +6,7 @@ from core.views import ForgotPasswordOTPView, LoginView, ResetPasswordView, Veri
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    # path('payment/',include('payment.urls')),
+    path('payment/',include('payment.urls')),
     path('users/', include('core.urls')),
     path('login/',LoginOTPView.as_view()),
     path('verify-otp/',VerifyOTPView.as_view()),

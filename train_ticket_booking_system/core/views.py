@@ -7,7 +7,7 @@ from .models import Train, TrainCoach, User,Station, Trainroute, Seat, Booking, 
 from django.db.models import Count, Q, F, FloatField, ExpressionWrapper
 from rest_framework.views import APIView
 from rest_framework import viewsets
-from .serializers import RunningTrainSerializer,OTPVerifySerializer, TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
+from .serializers import RunningTrainSerializer,DailyBookingSerializer,OTPVerifySerializer, TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from rest_framework.response import Response
@@ -25,6 +25,7 @@ from rest_framework.decorators import action
 from django.core.exceptions import ObjectDoesNotExist
 from utils.send_ticket_mail import send_booking_email
 from django.core.exceptions import ObjectDoesNotExist
+from utils.send_cancel_mail import send_cancel_mail
 # Create your views here.
 
 class UserViewset(viewsets.ModelViewSet):
@@ -335,44 +336,69 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
 
         return Response({"message":"Successfully applied delay"})
     
-    @action(detail=True, methods=['get'])
-    def reroute(self,request,pk=None):
+    @action(detail=True, methods=['post'])
+    def reroute(self, request, pk=None):
         train = self.get_object()
         train_start_date = request.data.get("date")
         stations = request.data.get("stations")
 
         if not train_start_date or not stations:
-            return Response({"error":"need to enter date and stations"},status=status.HTTP_400_BAD_REQUEST)
+            return Response({"error": "need to enter date and stations"}, status=status.HTTP_400_BAD_REQUEST)
 
-        train_start_date = datetime.strptime(train_start_date,"%Y-%m-%d")
+        train_start_date = datetime.strptime(train_start_date, "%Y-%m-%d")
 
-        routes = Trainroute.objects.filter(train=train,station__in = stations)
+        reroute_stations = Station.objects.filter(id__in=stations)
+        routes = Trainroute.objects.filter(train=train, station__in=reroute_stations)
 
-        if not routes:
-            return Response({"error":"No such stations in this train route"},status=status.HTTP_400_BAD_REQUEST)    
-        
-        last_route = Trainroute.objects.filter(train=train).last()
-        last_offset = last_route.day_offset
+        if not routes.exists():
+            return Response({"error": "No such stations in this train route"}, status=status.HTTP_400_BAD_REQUEST)
 
-        dates = []
+        last_offset = Trainroute.objects.filter(train=train).last().day_offset
+        dates = [train_start_date + timedelta(days=i) for i in range(last_offset + 1)]
 
-        for i in range(last_offset+1):
-            dates.append(train_start_date+timedelta(days=i))
-        
-        for station in stations:
-            station_stop_order = routes.get(station=station).stop_order
-            from_routes = Trainroute.objects.filter(train=train,stop_order__lte=station_stop_order).values('station')
-            to_routes = Trainroute.objects.filter(train=train,stop_order__gte=station_stop_order).values('station')
+        total_train_stations = list(
+            Trainroute.objects.filter(train=train)
+            .order_by("stop_order")
+            .values_list("station__station_name", flat=True)
+        )
+
+        for reroute_station in reroute_stations:
+            station_stop_order = routes.get(station=reroute_station).stop_order
+            from_routes = Trainroute.objects.filter(train=train, stop_order__lte=station_stop_order).values('station')
+            to_routes = Trainroute.objects.filter(train=train, stop_order__gte=station_stop_order).values('station')
 
             bookings = Booking.objects.filter(
                 train=train,
-                journey_date__in = dates,
-                from_station__in = from_routes,
-                to_station__in = to_routes,
-                status = 'confirmed'
-            ).update(train_rerouted=True,rerouted_station=station)
+                journey_date__in=dates,
+                from_station__in=from_routes,
+                to_station__in=to_routes,
+                status='confirmed'
+            )
 
-        return Response({"message":"Successfully sent rerouting mails"})
+            for booking in bookings:
+                from_idx = total_train_stations.index(booking.from_station.station_name)
+                to_idx = total_train_stations.index(booking.to_station.station_name)
+
+                boarding = None
+                for i in range(from_idx, -1, -1):
+                    if total_train_stations[i] not in [s.station_name for s in reroute_stations]:
+                        boarding = Station.objects.get(station_name=total_train_stations[i])
+                        break
+
+                get_off_station = None
+                for i in range(to_idx, len(total_train_stations)):
+                    if total_train_stations[i] not in [s.station_name for s in reroute_stations]:
+                        get_off_station = Station.objects.get(station_name=total_train_stations[i])
+                        break
+
+                booking.boarding_station = boarding  
+                booking.get_off_station = get_off_station  
+                booking.train_rerouted = True
+                booking.rerouted_station = reroute_station
+                booking.save()
+
+        return Response({"message": "Successfully sent rerouting mails"})
+
     
 class StationViewset(viewsets.ModelViewSet):    
     permission_classes = [IsAuthenticated, isAdmin]
@@ -589,6 +615,8 @@ class BookingView(APIView):
         passengers = validated_data["passengers"]
         no_of_tickets = len(passengers)
 
+        if from_station_id == to_station_id:
+            return Response({"error":"source and destination can't be the same"},status=status.HTTP_400_BAD_REQUEST)
         train = Train.objects.get(train_number=train_no)
         # print(train.train_name)
         from_station = Station.objects.get(id=from_station_id)
@@ -656,7 +684,7 @@ class BookingView(APIView):
 
         distance = to__single_route.distance - from_single_route.distance
         train_coach = TrainCoach.objects.filter(train=train,coach_type=coach_type).first()
-        total_fare = train_coach.base_price + distance*train_coach.fare_per_km
+        total_fare = len(passengers)*(train_coach.base_price + distance*train_coach.fare_per_km)
         booking = Booking.objects.create(
             user = request.user,
             train = train,
@@ -677,8 +705,7 @@ class BookingView(APIView):
                 seat = available_seats[i]
             )
             
-        send_booking_email(booking,train_start_date,from_arrival_time,to_arrival_time,to_date)
-        return Response({"message":f"Successfully booked {no_of_tickets} tickets,tickets have been sent to your mail"})
+        return Response({"message":"Successfully entered details now confirm the payment for booking the tickets"})
     
     def delete(self,request,booking_id):
 
@@ -687,7 +714,8 @@ class BookingView(APIView):
         booking.status = "cancelled"
         booking.save()
 
-        return Response({"message":"Booking cancelled successfully"})
+        send_cancel_mail(booking)
+        return Response({"message":f"Your booking with booking id {booking.id} has been cancelled successfully"})
 
     def put(self, request, booking_id):
 
@@ -757,7 +785,15 @@ class BookingView(APIView):
             to_update_obj.journey_date = new_journey_date
             to_update_obj.save()
 
-            return Response({"message": "Date changed successfully"})
+            return Response(
+                {
+                    "message": "Date changed successfully",
+                    "booking id":booking_row.id,
+                    "seat number":new_seat.seat_number,
+                    "berth":new_seat.berth_type,
+                    "coach number":new_seat.coach.coach_number,
+                    "date":new_journey_date
+            })
  
 class SingleBookingView(APIView):
 
@@ -904,7 +940,7 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         bookings = queryset.filter(booking_date_time__date=today_date,status='confirmed')
         if not bookings:
             return Response({"error":"No bookings done today"})
-        serializer = BookingSerializer(bookings,many=True)
+        serializer = DailyBookingSerializer(bookings,many=True)
 
         return Response(serializer.data)
     
@@ -963,15 +999,36 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         # print(trains_running_today)
 
         trains = Train.objects.filter(id__in=trains_running_today)
+        
+        data =[]
+        for train in trains:
+            coach = TrainCoach.objects.filter(train=train)
+            total_seats = Seat.objects.filter(coach__in=coach).count()
+            booked_seats = Booking.objects.filter(
+                train=train,
+                journey_date=today_date,
+                status='confirmed'
+            ).count()
+
+            available_seats = total_seats-booked_seats
+
+            data.append({
+                "train name":train.train_name,
+                "train_number":train.train_number,
+                "total seats":total_seats,
+                "booked seats":booked_seats,
+                "available seats":available_seats
+            })
+
         if not trains:
             return Response({"message":"No trains are running today"},status=status.HTTP_200_OK)
         
         paginator = PageNumberPagination()
         paginator.page_size = 5
 
-        paginated_queryset = paginator.paginate_queryset(trains,request)
-        serializer = RunningTrainSerializer(paginated_queryset,many=True)
-        return paginator.get_paginated_response(serializer.data)
+        paginated_queryset = paginator.paginate_queryset(data,request)
+        # serializer = RunningTrainSerializer(paginated_queryset,many=True)
+        return paginator.get_paginated_response(data)
 
  
 
