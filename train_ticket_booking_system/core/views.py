@@ -254,8 +254,6 @@ class ResetPasswordView(APIView):
                 return Response({"message":"Successfully Changed the password"})
             else:
                 return Response({"error":"Passwords don't match"},status=status.HTTP_400_BAD_REQUEST)
-        else:
-            return Response({"Hi"})
 
 class GetUserViewset(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
@@ -314,6 +312,7 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
 
         if not delay or not station_id or not starting_date:
             return Response({"error":"need to enter delay and the station and the date"},status=status.HTTP_400_BAD_REQUEST)
+        
         train_route = Trainroute.objects.get(train=train, station=station_id)
         total_routes = Trainroute.objects.filter(train=train)
         delay_stop_order = train_route.stop_order
@@ -506,7 +505,6 @@ class SearchResultsview(APIView):
                     break  
             
             queryset = queryset.filter(train_id__in=filtered_train_ids)
-
 
         if arrival_train_time and minutes:
             start_time = datetime.strptime(arrival_train_time, "%H:%M").time()

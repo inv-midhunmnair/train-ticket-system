@@ -26,7 +26,7 @@ class PaymentInitiateView(APIView):
             booking = Booking.objects.get(id=booking_id)
 
         except Booking.DoesNotExist:
-            return Response({"error": "Booking not found"}, status=404)
+            return Response({"error": "Booking not found"}, status=status.HTTP_404_NOT_FOUND)
         
         client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
         
@@ -109,9 +109,18 @@ class RefundView(APIView):
 
         booking_id = request.data.get("booking_id")
 
+        if not booking_id:
+            return Response({"error":"Booking id is required"},status=status.HTTP_400_BAD_REQUEST)
+        
         booking = Booking.objects.get(id=booking_id)
 
+        if not booking:
+            return Response({"error":"Booking not found"},status=status.HTTP_404_NOT_FOUND)
+
         payment = Payment.objects.get(booking=booking)
+
+        if not payment:
+            return Response({"error":"No payment found associated with the booking"},status=status.HTTP_404_NOT_FOUND)
 
         if booking.status != 'cancelled':
             return Response({"error":"This booking is still active so refund is not possible"})
