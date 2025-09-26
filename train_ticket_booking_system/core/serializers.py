@@ -3,29 +3,20 @@ from rest_framework import serializers
 from .validators import *
 from rest_framework.response import Response
 from rest_framework import status
+
 class UserSerializer(serializers.ModelSerializer):
-
-    role_display = serializers.SerializerMethodField()
-
-    def get_role_display(self, obj):
-        if obj.role == 0:
-            return "user"
-        else:
-            return "admin"
 
     phone_number = serializers.CharField(validators = [validate_phone_number])
     first_name = serializers.CharField(validators = [validate_name])
     last_name = serializers.CharField(validators = [validate_name])
     email = serializers.EmailField(validators = [validate_email])
     username = serializers.CharField(validators = [validate_username])
+    password = serializers.CharField(validators = [validate_password],write_only=True)
 
     class Meta:
         model = User
-        fields = ['id','email','phone_number','first_name','last_name','role','username','password','role_display']
-        extra_kwargs = {
-            'password': {'write_only': True}
-        }
-    
+        fields = ['id','email','phone_number','first_name','last_name','role','username','password']
+
     def create(self, validated_data):
         password = validated_data.pop('password')
         user = User(**validated_data)
@@ -43,9 +34,12 @@ class GetUserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['username','first_name', 'last_name', 'email', 'phone_number']
+        read_only_fields = ['email']
 
 class StationSerializer(serializers.ModelSerializer):
 
+    station_name = serializers.CharField(validators = [validate_station_name])
+    station_code = serializers.CharField(validators = [validate_station_code])
     class Meta:
         model = Station 
         fields = '__all__'
@@ -67,7 +61,7 @@ class TrainrouteSerializer(serializers.ModelSerializer):
 class TrainSerializer(serializers.ModelSerializer):
 
     train_name = serializers.CharField(validators=[validate_train_name])
-    train_number = serializers.IntegerField()
+    train_number = serializers.IntegerField(validators = [validate_train_number])
 
     class Meta:
         model = Train

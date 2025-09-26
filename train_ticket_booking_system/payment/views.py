@@ -61,7 +61,11 @@ class VerifyPaymentView(APIView):
         razorpay_order_id = request.data.get("razorpay_order_id")
         razorpay_payment_id = request.data.get("razorpay_payment_id")
         razorpay_signature = request.data.get("razorpay_signature")
-        booking_id = request.data.get("booking_id")
+
+        try:
+            booking_id = request.data.get("booking_id")
+        except Booking.DoesNotExist:
+            return Response({"error":"Booking not found"},status=status.HTTP_400_BAD_REQUEST)
 
         params_dict = {
             "razorpay_order_id":razorpay_order_id,

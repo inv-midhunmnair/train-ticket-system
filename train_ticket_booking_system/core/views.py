@@ -32,11 +32,12 @@ from utils.send_cancel_mail import send_cancel_mail
 class UserViewset(viewsets.ModelViewSet):
     queryset = User.objects.all()   
     permission_classes = [AllowAny]
+    
     def get_serializer_class(self):
-        if self.request.method in ['PUT','PATCH']:
-            return UpdateSerializer 
-
-        return UserSerializer
+        if self.action in ['update','partial_update']:
+            return UpdateSerializer
+        else:
+            return UserSerializer
 
     def perform_create(self, serializer):
         user = serializer.save()
@@ -53,7 +54,7 @@ class UserViewset(viewsets.ModelViewSet):
             [user.email],
             fail_silently=True
         )
-    
+
     def create(self, request, *args, **kwargs):
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -63,28 +64,32 @@ class UserViewset(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def status(self, request, pk=None):
-
+        
         if request.data.get('is_active') == 0:
             user = self.get_object()
             user.is_active = 0
             user.save()
-
+ 
             return Response({"message":"successfully changed the status"})
         
-        else:
+        elif request.data.get('is_active') == 1:
             user = self.get_object()
             user.is_active = 1
             user.save()
 
             return Response({"message":"successfully changed the status"})
+        
+        else:
+            return Response({"error":"Invalid Input"})
 
 class VerifyEmailView(APIView):
+    
     def get(self,request, *args, **kwargs):
         uid = request.GET.get("uid")
         token = request.GET.get("token")
 
         if not uid or not token:
-            return Response({"error":"UID and token are required"}, status = status.HTTP_400_BAD_REQUEST)
+            return Response({"error":"UID and token are required"}, status = status.HTTP_404_NOT_FOUND)
         
         try:
             user = User.objects.get(pk=uid)
@@ -258,6 +263,7 @@ class ResetPasswordView(APIView):
 class GetUserViewset(viewsets.ModelViewSet):
     permission_classes = [IsAuthenticated]
     serializer_class = GetUserSerializer
+    pagination_class = None 
     
     def get_queryset(self):
         return User.objects.filter(id=self.request.user.id)
@@ -275,14 +281,14 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
 
         train = serializer.instance
 
-        return Response({"message":"Successfully added train"},status=status.HTTP_201_CREATED)
+        return Response({"message":f"Successfully added train {train.train_name}"},status=status.HTTP_201_CREATED)
     
     def destroy(self, request, *args, **kwargs):
         train = self.get_object()
         train.is_active = False
         train.save()
 
-        return Response({"message":"Train Deleted successfully"},status=status.HTTP_204_NO_CONTENT)
+        return Response({"message":f"{train.train_name} deleted successfully"},status=status.HTTP_204_NO_CONTENT)
     
     @action(detail=True, methods=['post'])
     def deactivate(self,request,pk=None):
@@ -307,16 +313,20 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
     def delay(self,request,pk=None):
         train = self.get_object()
         delay = request.data.get("delay")
+        delay = int(delay)
         station_id = request.data.get("station_id")
         starting_date = request.data.get("date")
 
         if not delay or not station_id or not starting_date:
             return Response({"error":"need to enter delay and the station and the date"},status=status.HTTP_400_BAD_REQUEST)
         
-        train_route = Trainroute.objects.get(train=train, station=station_id)
+        try:
+            train_route = Trainroute.objects.get(train=train, station=station_id)
+        except Trainroute.DoesNotExist:
+            return Response({{"error":"Train does not go through this station"}})
+        
         total_routes = Trainroute.objects.filter(train=train)
         delay_stop_order = train_route.stop_order
-
         from_routes = Trainroute.objects.filter(train=train,stop_order__lte=delay_stop_order).values_list('station', flat=True)
         to_routes = Trainroute.objects.filter(train=train,stop_order__gte=delay_stop_order).values_list('station', flat=True)
 
@@ -346,9 +356,20 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
             return Response({"error": "need to enter date and stations"}, status=status.HTTP_400_BAD_REQUEST)
 
         train_start_date = datetime.strptime(train_start_date, "%Y-%m-%d")
+        train_start_day = train_start_date.strftime("%A").lower()
 
+        if train_start_day not in train.schedule_days:
+            return Response({"error":"Train doesen't run on this day"},status=status.HTTP_400_BAD_REQUEST)
+        
         reroute_stations = Station.objects.filter(id__in=stations)
+
+        if not reroute_stations:
+            return Response({"error":"Invalid Station Entered"},status=status.HTTP_404_NOT_FOUND)
+        
         routes = Trainroute.objects.filter(train=train, station__in=reroute_stations)
+
+        if not routes:
+            return Response({"error":"Station not in the train's route"},status=status.HTTP_400_BAD_REQUEST)
 
         if not routes.exists():
             return Response({"error": "No such stations in this train route"}, status=status.HTTP_400_BAD_REQUEST)
@@ -480,7 +501,7 @@ class SearchResultsview(APIView):
 
             elif source_from and destination_to:
                 queryset = queryset.filter(train_id__in=matching_train_id)
-
+   
         if min_price or max_price:
             min_price = float(min_price) 
             max_price = float(max_price) 
@@ -659,9 +680,6 @@ class BookingView(APIView):
         from_route = train_routes.filter(station=from_station).first()
         to_route = train_routes.filter(station=to_station).first()
 
-        from_arrival_time = from_route.arrival_time
-        to_arrival_time = to_route.arrival_time
-
         if not from_route:
             return Response({"error":f"This train doesen't go through {from_station.station_name}"},status=status.HTTP_400_BAD_REQUEST)
         if not to_route:
@@ -770,7 +788,11 @@ class BookingView(APIView):
 
     def put(self, request, booking_id):
 
-        booking_row = Booking.objects.get(id=booking_id, user=request.user)
+        try:
+            booking_row = Booking.objects.get(id=booking_id, user=request.user)
+        except Booking.DoesNotExist:
+            return Response({"error":"Booking with that id does not exist"})
+        
         passengers = booking_row.passengers.all()
         new_journey_date = request.data.get("new_journey_date")
 
@@ -1002,7 +1024,10 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
 
         bookings = queryset.filter(booking_date_time__date=today_date).count()
         cancelled_bookings = queryset.filter(booking_date_time__date=today_date,status='cancelled').count()    
-        today_cancel_ratio = round((cancelled_bookings/bookings)*100,2)
+        try:
+            today_cancel_ratio = round((cancelled_bookings/bookings)*100,2)
+        except ZeroDivisionError:
+            today_cancel_ratio = "No Cancelled Bookings today"
 
         yesterday_date = today_date - timedelta(days=1)
         yesterday_bookings = queryset.filter(booking_date_time__date=yesterday_date).count()
@@ -1020,8 +1045,8 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
         except ZeroDivisionError:
             yesterday_cancel_ratio = "No bookings done yesterday"
         
-        return Response({"Today's cancellation ratio":{today_cancel_ratio},
-                        "Yesterday's cancellation ratio":{yesterday_cancel_ratio},
+        return Response({"Today's cancellation ratio":today_cancel_ratio,
+                        "Yesterday's cancellation ratio":yesterday_cancel_ratio,
                         "Today's confirmed revenue":today_confirmed_revenue,
                         "Yesterday's confirmed revenue":yesterday_confirmed_revenue,})
     
