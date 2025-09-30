@@ -1,20 +1,20 @@
 from itertools import groupby
 from django.urls import reverse
-from django.db.models import Sum, Avg, Max, Case, When, Value, CharField,Count
+from django.db.models import Sum, Max, Case, When, Value, CharField,Count
 from django.db.models.functions import Round
 from django.conf import settings
 from rest_framework.pagination import PageNumberPagination
 from .models import Train, TrainCoach, User,Station, Trainroute, Seat, Booking, Passenger,TrainCancellation
-from django.db.models import Count, Q, F, FloatField, ExpressionWrapper
+from django.db.models import Count, Q, F, FloatField
 from rest_framework.views import APIView
 from rest_framework import viewsets
-from .serializers import RunningTrainSerializer,DailyBookingSerializer,OTPVerifySerializer, TrainSearchSerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
+from .serializers import DailyBookingSerializer,OTPVerifySerializer,LoginSerializer,BookingSerializer,NewbookingSerializer, TrainSerializer, UserSerializer, UpdateSerializer,StationSerializer,GetUserSerializer, TrainrouteSerializer
 from django.contrib.auth.tokens import default_token_generator
 from django.core.mail import send_mail
 from rest_framework.response import Response
 from django.db.models.functions import ExtractMonth
 from rest_framework import status
-from datetime import datetime, time, timedelta
+from datetime import datetime, timedelta
 from django.utils import timezone
 import random
 from rest_framework.permissions import AllowAny
@@ -24,24 +24,33 @@ from .permissions import isAdmin
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.decorators import action
 from django.core.exceptions import ObjectDoesNotExist
-from utils.send_ticket_mail import send_booking_email
 from django.core.exceptions import ObjectDoesNotExist
 from utils.send_cancel_mail import send_cancel_mail
 # Create your views here.
 
 class UserViewset(viewsets.ModelViewSet):
+
+    '''User class for CRUD of users'''
+
     queryset = User.objects.all()   
     permission_classes = [AllowAny]
     
     def get_serializer_class(self):
+
+        '''Deciding the serializer class according to the request type'''
+
         if self.action in ['update','partial_update']:
             return UpdateSerializer
         else:
             return UserSerializer
 
-    def perform_create(self, serializer):
-        user = serializer.save()
+    def create(self, request, *args, **kwargs):
+        
+        '''Overriding the default post method of the viewset'''
 
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = serializer.save()
         token = default_token_generator.make_token(user)
         verify_url = self.request.build_absolute_uri(
             reverse('verify-email')+ f"?uid={user.pk}&token={token}"
@@ -55,24 +64,22 @@ class UserViewset(viewsets.ModelViewSet):
             fail_silently=True
         )
 
-    def create(self, request, *args, **kwargs):
-        serializer = self.get_serializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        self.perform_create(serializer)
         return Response({"message": "User created successfully. Please verify your email for further proceedings."},
                         status=status.HTTP_201_CREATED)
     
     @action(detail=True, methods=['post'])
     def status(self, request, pk=None):
-        
-        if request.data.get('is_active') == 0:
+
+        '''Status change for users'''
+
+        if int(request.data.get("is_active")) == 0:
             user = self.get_object()
             user.is_active = 0
             user.save()
  
             return Response({"message":"successfully changed the status"})
         
-        elif request.data.get('is_active') == 1:
+        elif int(request.data.get('is_active')) == 1:
             user = self.get_object()
             user.is_active = 1
             user.save()
@@ -80,11 +87,16 @@ class UserViewset(viewsets.ModelViewSet):
             return Response({"message":"successfully changed the status"})
         
         else:
-            return Response({"error":"Invalid Input"})
+            return Response({"error":"Invalid Input"},status=status.HTTP_400_BAD_REQUEST)
 
 class VerifyEmailView(APIView):
-    
+
+    '''Email verification view'''
+
     def get(self,request, *args, **kwargs):
+
+        '''Overriding the get request for the view'''
+
         uid = request.GET.get("uid")
         token = request.GET.get("token")
 
@@ -106,7 +118,12 @@ class VerifyEmailView(APIView):
 
 class LoginOTPView(APIView):
 
+    '''OTP generation upon login'''
+
     def post(self, request):
+        
+        '''Login OTP generation POST'''
+
         email = request.data.get("email")
         password = request.data.get("password")
         serializer = LoginSerializer(data=request.data)
@@ -115,7 +132,6 @@ class LoginOTPView(APIView):
 
         user = authenticate(request, username=validated_data['email'],password=password)
 
-        # print(user)
         if user is None:
             return Response({"error":"Invalid credentials"}, status=status.HTTP_401_UNAUTHORIZED)
         db_data = User.objects.get(email=email)
@@ -142,8 +158,13 @@ class LoginOTPView(APIView):
         return Response({"message":"OTP sent to your mail. Please verify to continue"})
     
 class VerifyOTPView(APIView):
+
+    '''Login OTP verification'''
+
     def post(self, request):
-        email = request.data.get("email")
+
+        '''Defining POST method for verification'''
+
         otp = request.data.get("otp")
 
         serializer = LoginSerializer(data=request.data)
@@ -176,7 +197,13 @@ class VerifyOTPView(APIView):
             return Response({"error":"You are either blocked or email isn't verified"}, status=status.HTTP_401_UNAUTHORIZED)
         
 class ForgotPasswordOTPView(APIView):
+
+    '''ForgotPassword OTP View'''
+
     def post(self, request):
+
+        '''Defining Forgot Password POST'''
+
         serializer = LoginSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         validated_data = serializer.validated_data
@@ -205,7 +232,12 @@ class ForgotPasswordOTPView(APIView):
             return Response({"message":"OTP has been sent to your mail"})
                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
 class VerifyPasswordOTPView(APIView):
+
+    '''Verify Forgot Password OTP view'''
+
     def post(self,request):
+
+        '''Defining POST method'''
 
         serializer = OTPVerifySerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -244,7 +276,12 @@ class VerifyPasswordOTPView(APIView):
 
 class ResetPasswordView(APIView):
 
+    '''Password Reset View'''
+
     def post(self,request,*args,**kwargs):
+        
+        '''Defining POST method for resetting password'''
+        
         id = request.GET.get('uid')
         token = request.GET.get('token')
         password = request.data.get('password')
@@ -261,20 +298,32 @@ class ResetPasswordView(APIView):
                 return Response({"error":"Passwords don't match"},status=status.HTTP_400_BAD_REQUEST)
 
 class GetUserViewset(viewsets.ModelViewSet):
+
+    '''Profile wise CRUD for user'''
+
     permission_classes = [IsAuthenticated]
     serializer_class = GetUserSerializer
     pagination_class = None 
     
     def get_queryset(self):
+
+        '''Getting the queryset'''
+
         return User.objects.filter(id=self.request.user.id)
     
 class TrainDetailsViewset(viewsets.ModelViewSet):
+
+    '''Train Viewset for CRUD'''
+
     permission_classes = [IsAuthenticated, isAdmin]
 
     queryset = Train.objects.all()
     serializer_class = TrainSerializer
 
     def create(self,request,*args,**kwargs):
+
+        '''Overriding the POST method inside the viewset'''
+
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         self.perform_create(serializer)
@@ -284,6 +333,9 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
         return Response({"message":f"Successfully added train {train.train_name}"},status=status.HTTP_201_CREATED)
     
     def destroy(self, request, *args, **kwargs):
+
+        '''Overriding the DELETE method inside the viewset'''
+
         train = self.get_object()
         train.is_active = False
         train.save()
@@ -292,6 +344,9 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def deactivate(self,request,pk=None):
+
+        '''Deactivating  train'''
+
         train = self.get_object()
         date = request.data.get("date")
         
@@ -311,6 +366,9 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
     
     @action(detail=True,methods=['post'])
     def delay(self,request,pk=None):
+        
+        '''View written for handling delay of trains'''
+
         train = self.get_object()
         delay = request.data.get("delay")
         delay = int(delay)
@@ -348,6 +406,9 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
     
     @action(detail=True, methods=['post'])
     def reroute(self, request, pk=None):
+
+        '''Handles the rerouting of trains'''
+
         train = self.get_object()
         train_start_date = request.data.get("date")
         stations = request.data.get("stations")
@@ -421,19 +482,31 @@ class TrainDetailsViewset(viewsets.ModelViewSet):
         return Response({"message": "Successfully sent rerouting mails"})
 
 class StationViewset(viewsets.ModelViewSet):    
+
+    '''Station CRUD'''
+
     permission_classes = [IsAuthenticated, isAdmin]
 
     queryset = Station.objects.all()
     serializer_class = StationSerializer
 
 class TrainroutesViewset(viewsets.ModelViewSet):
+
+    '''Train routes CRUD'''
+
     permission_classes = [IsAuthenticated, isAdmin]
 
     queryset = Trainroute.objects.all()
     serializer_class = TrainrouteSerializer
 
 class LoginView(APIView):
+
+    '''Handles Login functionality'''
+
     def post(self,request):
+
+        '''POST for handling the requests'''
+
         user = authenticate(request, username=request.data.get('email'),password=request.data.get('password'))
         refresh = RefreshToken.for_user(user)
         access = refresh.access_token
@@ -442,7 +515,11 @@ class LoginView(APIView):
                                                     
 class SearchResultsview(APIView):
 
+    '''View handling search functionality for Trains'''
+
     def get(self,request):
+        
+        '''Listing API'''
 
         source_from = request.GET.get("from_station")
         destination_to = request.GET.get("to_station")
@@ -472,30 +549,25 @@ class SearchResultsview(APIView):
             to_dict = {}
             for to_id in to_queryset:
                 to_dict[to_id['train_id']] = {'stop_order':to_id['stop_order'],'day_offset':to_id['day_offset']}
-            # print(to_dict)
 
             matching_train_id = []
             for from_id in from_queryset:
                 if from_id['train_id'] in to_dict and from_id['stop_order']<to_dict[from_id['train_id']]['stop_order']:
                     matching_train_id.append(from_id['train_id'])
-            # print(matching_train_id)
 
             if source_from and destination_to and date:
                 date = datetime.strptime(date,"%Y-%m-%d")
                 
                 valid_train_ids = []
-                # print(from_queryset)
-                # print(to_dict)
+
                 for valid_id in from_queryset:
                     if valid_id['train_id'] in to_dict and valid_id['stop_order']<to_dict[valid_id['train_id']]['stop_order']:
                         checking_date = date-timedelta(days=valid_id['day_offset'])
-                        # print(checking_date)
+
                         day_name = checking_date.strftime("%A")
-                        # print(day_name)
+
                         if day_name.lower() in valid_id['train__schedule_days']:    
                             valid_train_ids.append(valid_id['train_id'])
-
-                    # print(valid_train_ids)
 
                 queryset = queryset.filter(train_id__in = valid_train_ids, train__schedule_days__icontains = day_name)
 
@@ -518,7 +590,7 @@ class SearchResultsview(APIView):
             distance = to_route.distance - from_route.distance
 
             coaches = TrainCoach.objects.filter(train=train,coach_type=coach_type)
-            # print(coaches)
+
             for coach in coaches:
                 total_price = coach.base_price + (distance * coach.fare_per_km)
                 if min_price <= total_price <= max_price:
@@ -529,9 +601,9 @@ class SearchResultsview(APIView):
 
         if arrival_train_time and minutes:
             start_time = datetime.strptime(arrival_train_time, "%H:%M").time()
-            # print(start_time)
+
             end_time = (datetime.combine(datetime.today(), start_time)+timedelta(minutes=int(minutes))).time()
-            # print(end_time)
+
             queryset = queryset.filter(arrival_time__gte = start_time,
                                                  arrival_time__lte = end_time)
     
@@ -570,7 +642,12 @@ class SearchResultsview(APIView):
 
 class TrainTrackingView(APIView):
     
+    '''Tracking the Train View'''
+
     def get(self, request):
+
+        '''Using the listing API'''
+
         train_no = request.GET.get("train_number")
         date = request.GET.get("date")  
 
@@ -590,12 +667,12 @@ class TrainTrackingView(APIView):
         while start_date.strftime("%A").lower() not in scheduled_days:
             start_date = start_date - timedelta(days=1)
 
-        # print(start_date)
         routes = Trainroute.objects.filter(train=train).select_related("station").order_by("stop_order")
 
-        now = datetime.combine(search_date, time(hour=8, minute=5))
+        # now = datetime.combine(search_date, time(hour=8, minute=5))
 
-        # now = datetime.now()
+        now = datetime.now()
+
         for i, route in enumerate(routes):
             arrival_dt = datetime.combine(start_date, route.arrival_time) + timedelta(days=route.day_offset)
             departure_dt = datetime.combine(start_date, route.departure_time) + timedelta(days=route.day_offset)
@@ -617,6 +694,7 @@ class TrainTrackingView(APIView):
             if i + 1 < len(routes):
                 next_route = routes[i + 1]
                 next_arrival_dt = datetime.combine(start_date, next_route.arrival_time) + timedelta(days=next_route.day_offset)
+                
                 if departure_dt < now < next_arrival_dt:
                     return Response({
                         "train_name": train.train_name,
@@ -635,9 +713,13 @@ class TrainTrackingView(APIView):
 
 class BookingView(APIView):
 
+    '''View that handles the Booking'''
+
     permission_classes = [IsAuthenticated]
     def get(self,request):
         
+        '''List API for listing the Bookings associated with the user'''
+
         booking = Booking.objects.filter(user=request.user)
         
         if not booking:
@@ -647,6 +729,8 @@ class BookingView(APIView):
         return Response(serializer.data)
 
     def post(self, request):
+        
+        '''Create New Booking API'''
 
         serializer = NewbookingSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
@@ -663,17 +747,14 @@ class BookingView(APIView):
         if from_station_id == to_station_id:
             return Response({"error":"source and destination can't be the same"},status=status.HTTP_400_BAD_REQUEST)
         train = Train.objects.get(train_number=train_no)
-        # print(train.train_name)
         from_station = Station.objects.get(id=from_station_id)
-        # print(from_station.station_name)
         to_station = Station.objects.get(id=to_station_id)
-        # print(to_station.station_name)
+
         coach = TrainCoach.objects.filter(train=train,coach_type=coach_type)
         if not coach:
             return Response({"error":"Available coach doesn't exist"},status=status.HTTP_400_BAD_REQUEST)
-        # print(coach)
+
         seats = Seat.objects.filter(coach_id__in=coach)
-        # print(seats)  
         
         train_routes = Trainroute.objects.filter(train=train).order_by('stop_order')
 
@@ -693,8 +774,6 @@ class BookingView(APIView):
         
         train_start_date = journey_date - timedelta(days=from_route.day_offset)
 
-        to_date = train_start_date+timedelta(days=to_route.day_offset)
-
         day_name = train_start_date.strftime("%A").lower()
 
         train_schedule_days = train.schedule_days
@@ -713,8 +792,6 @@ class BookingView(APIView):
             booking__status__in = ["confirmed","train cancelled"],
             seat__coach__coach_type = coach_type 
         ).values_list("seat_id",flat=True)
-        # print(f"No:of seats booked:{len(booked)}")
-        # print(f"Total no of seats:{len(seats)}")
 
         available_seats = seats.exclude(id__in = booked)
 
@@ -736,7 +813,6 @@ class BookingView(APIView):
             journey_date = journey_date,
             total_fare = total_fare
         )
-        # print(booking)
 
         for i,passenger in enumerate(passengers):
             Passenger.objects.create(
@@ -751,6 +827,8 @@ class BookingView(APIView):
     
     def delete(self,request,booking_id):
 
+        '''Booking Cancellation API'''
+
         now = datetime.today()
 
         booking = Booking.objects.get(id=booking_id, user=request.user)
@@ -762,8 +840,6 @@ class BookingView(APIView):
 
         train_start_date = datetime.combine(start_date,train_start_time)
         
-        print(train_start_date)
-        print(now)
         booking.status = "cancelled"
         
         time_difference = ((train_start_date - now).total_seconds())/3600
@@ -787,6 +863,8 @@ class BookingView(APIView):
         return Response({"message":f"Your booking with booking id {booking.id} has been cancelled successfully"})
 
     def put(self, request, booking_id):
+
+        '''Changing the journey date API'''
 
         try:
             booking_row = Booking.objects.get(id=booking_id, user=request.user)
@@ -825,8 +903,7 @@ class BookingView(APIView):
                 train=booking_row.train,
                 coach_type=passengers[0].seat.coach.coach_type
             )
-            # print(coaches)
-            # available_seats = []
+
             total_seats = Seat.objects.filter(coach__in = coaches)
 
             booked = Passenger.objects.filter(
@@ -838,10 +915,7 @@ class BookingView(APIView):
                 seat__coach__coach_type = passengers[0].seat.coach.coach_type
             ).values_list('seat_id', flat=True)
 
-            # print(len(total_seats))
             available_seats = total_seats.exclude(id__in = booked).values_list('id',flat=True)
-            # print(len(available_seats))
-            # print(len(passengers))
 
             if len(passengers) > len(available_seats):
                 return Response(
@@ -870,6 +944,8 @@ class BookingView(APIView):
  
 class SingleBookingView(APIView):
 
+    '''Show single Booking'''
+
     permission_classes = [IsAuthenticated]
  
     def get(self,request,booking_id):
@@ -884,7 +960,12 @@ class SingleBookingView(APIView):
 
 class AvailabilityView(APIView):
 
+    '''View that handles the availability of trains'''
+
     def get(self,request):
+
+        '''Listing API for displaying'''
+
         train_number = request.GET.get("train_number")
         source_from = request.GET.get("from")
         destination_to = request.GET.get("to")
@@ -908,17 +989,14 @@ class AvailabilityView(APIView):
             booking__status__in = ['confirmed','train cancelled'] 
         ).values_list("seat_id",flat=True)
 
-        # print(f"Total seats are:{len(total_seats)}")
-        # print(f"Total booked seats are:{len(booked)}")
-
-        # print(booked)
-        # print(total_seats)
         available_seats = total_seats.exclude(id__in=booked)
-        # print(len(available_seats))
 
         return Response({"message":f"There are {len(available_seats)} seats available for booking"})
 
 class AdminDashboardviewset(viewsets.ModelViewSet):
+
+    '''Dashboard view for the admin'''
+
     permission_classes = [isAdmin,IsAuthenticated]
 
     queryset = Booking.objects.all()
@@ -926,6 +1004,9 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
 
     @action(detail=False,methods=['get'])
     def statistics(self,request):
+
+        '''Show statistics for the admin dashboard'''
+
         queryset = self.get_queryset()
         active_bookings = queryset.filter(status='confirmed').count()
         cancelled_bookings = queryset.filter(status='cancelled').count()
@@ -1008,6 +1089,8 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
     @action(detail=False,methods=['get'])
     def daily_bookings(self,request):
 
+        '''Show daily bookings'''
+
         today_date = timezone.now().date()
         queryset = self.get_queryset()
         bookings = queryset.filter(booking_date_time__date=today_date,status='confirmed')
@@ -1019,6 +1102,9 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
     
     @action(detail=False,methods=['get'])
     def daily_reports(self,request):
+
+        '''Show daily reports'''
+
         queryset = self.get_queryset()
         today_date = timezone.now().date()
 
@@ -1052,14 +1138,13 @@ class AdminDashboardviewset(viewsets.ModelViewSet):
     
     @action(detail=False,methods=['get'])
     def running_trains(self,request):
+
+        '''Show running trains'''
+
         today_date = timezone.now().date()
-        # today_date = datetime(2025,9,11).date()
 
         cancelled_trains = TrainCancellation.objects.filter(cancellation_date=today_date).values_list('train_id')
-        # print(cancelled_trains)
-
         trains_with_offset = Train.objects.exclude(id__in=cancelled_trains).annotate(max_day_offset=Max('train_route__day_offset')).values('id','max_day_offset','schedule_days')
-        # print(trains_with_offset)
 
         trains_running_today = []
 

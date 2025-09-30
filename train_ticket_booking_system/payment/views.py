@@ -10,18 +10,24 @@ from rest_framework import status
 from rest_framework.permissions import IsAuthenticated
 from utils.send_ticket_mail import send_booking_email
 from datetime import timedelta
-from datetime import datetime
 
 # Create your views here.
 
 class PaymentInitiateView(APIView):
+    
+    '''Inititate a new payment'''
 
     permission_classes = [IsAuthenticated]
     
     def post(self,request):
 
+        '''POST API for creating new order'''
+         
         booking_id = request.data.get("booking_id")
 
+        if not booking_id:
+            return Response({"error":"Please provide a Booking ID"},status=status.HTTP_400_BAD_REQUEST)
+        
         try:
             booking = Booking.objects.get(id=booking_id)
 
@@ -55,15 +61,24 @@ class PaymentInitiateView(APIView):
 
 class VerifyPaymentView(APIView):
 
+    '''Payment Verification API'''
+
     permission_classes = [IsAuthenticated]
     
     def post(self,request):
+
+        '''Verification of Payment POST API'''
+
         razorpay_order_id = request.data.get("razorpay_order_id")
         razorpay_payment_id = request.data.get("razorpay_payment_id")
         razorpay_signature = request.data.get("razorpay_signature")
+        booking_id = request.data.get("booking_id")
 
+        if not booking_id:
+            return Response({"error":"Please provide booking id also"},status=status.HTTP_400_BAD_REQUEST)
         try:
-            booking_id = request.data.get("booking_id")
+            Booking.objects.get(id=booking_id)
+
         except Booking.DoesNotExist:
             return Response({"error":"Booking not found"},status=status.HTTP_400_BAD_REQUEST)
 
@@ -77,7 +92,7 @@ class VerifyPaymentView(APIView):
 
         try:
             client.utility.verify_payment_signature(params_dict)
-            payment = Payment.objects.get(booking=booking_id)
+            payment = Payment.objects.get(booking=booking_id,id=razorpay_payment_id)
             payment.payment_id = razorpay_payment_id
             payment.order_id = razorpay_order_id
             payment.payment_status = "success"
@@ -104,10 +119,14 @@ class VerifyPaymentView(APIView):
         
         except SignatureVerificationError:
             return Response({"error":"Signature verification failed"},status=status.HTTP_400_BAD_REQUEST)
-
+        
 class RefundView(APIView):
     
+    '''Initiate Refund'''
+
     def delete(self,request):
+
+        '''DELETE API for initiating refund'''
 
         SERVICE_CHARGE = 10
 
@@ -135,7 +154,6 @@ class RefundView(APIView):
             refund_amount = 0
             
         refund_amount_paise = refund_amount*100
-        print(refund_amount)
         client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID,settings.RAZORPAY_KEY_SECRET))
 
         refund = client.payment.refund(
